@@ -104,15 +104,136 @@ def uds_read_did(did):
         print("Unexpected frame")
         return
 
+# -----------------------------
+# 5. MANUAL ISO-TP SEND
+# -----------------------------
+
+
+def uds_send(payload):
+    # Determine length
+    length = len(payload)
+
+    # -------- Single Frame --------
+    if length <= 7:
+        data = bytes([length]) + payload + bytes(7 - length)
+        send_request(data)
+
+    # -------- First Frame --------
+    else:
+        first_len = min(6, length)
+        ff = bytes([
+            0x10 | ((length >> 8) & 0x0F),
+            length & 0xFF
+        ]) + payload[:first_len]
+
+        ff += bytes(8 - len(ff))
+        send_request(ff)
+
+        # Wait for FC
+        fc = recv_frame()
+        if not fc or (fc[0] >> 4) != 3:
+            print("No Flow Control received")
+            return None
+
+        # Send Consecutive Frames
+        seq = 1
+        idx = first_len
+
+        while idx < length:
+            chunk = payload[idx:idx+7]
+            cf = bytes([0x20 | (seq & 0x0F)]) + chunk
+            cf += bytes(8 - len(cf))
+
+            send_request(cf)
+
+            idx += len(chunk)
+            seq = (seq + 1) % 16
+            time.sleep(0.001)
+
+    # Receive response (reuse your logic)
+    return uds_receive_response()
 
 # -----------------------------
-# 5. TEST
+# 6. RECEIVE RESPONSE
+# -----------------------------
+
+
+def uds_receive_response():
+    data = recv_frame()
+    if not data:
+        print("No response")
+        return None
+
+    pci_type = data[0] >> 4
+
+    # Single Frame
+    if pci_type == 0:
+        length = data[0] & 0x0F
+        return data[1:1+length]
+
+    # First Frame
+    elif pci_type == 1:
+        total_len = ((data[0] & 0x0F) << 8) | data[1]
+        response = data[2:]
+
+        # Send FC
+        fc = can.Message(
+            arbitration_id=TX_ID,
+            data=bytes([0x30, 0x00, 0x00, 0, 0, 0, 0, 0]),
+            is_extended_id=True
+        )
+        bus.send(fc)
+
+        while len(response) < total_len:
+            cf = recv_frame()
+            if not cf:
+                return None
+            if (cf[0] >> 4) == 2:
+                response += cf[1:]
+
+        return response[:total_len]
+
+# -----------------------------
+# 7. WRITE DID
+# -----------------------------
+
+
+def uds_write_did(did, data_bytes):
+    payload = bytes([0x2E, (did >> 8) & 0xFF, did & 0xFF]) + data_bytes
+
+    print(f"\n[WRITE] DID 0x{did:04X} DATA: {data_bytes.hex()}")
+
+    resp = uds_send(payload)
+
+    if not resp:
+        print("No response")
+        return
+
+    print("Response:", resp.hex())
+
+    # Positive response
+    if resp[0] == 0x6E:
+        print("Write SUCCESS")
+
+    # Negative response
+    elif resp[0] == 0x7F:
+        print(f"Negative Response: NRC=0x{resp[2]:02X}")
+
+
+# -----------------------------
+# 8. TEST
 # -----------------------------
 print("\n--- Single Frame DID 0x220F ---")
 uds_read_did(0x220F)
 
 print("\n--- Multi Frame DID 0xF191 ---")
 uds_read_did(0xF191)
+
+print("\n--- Write DID 0x220F ---")
+uds_send(bytes([0x10, 0x03]))
+
+# Try writing (example data)
+uds_write_did(0x220F, bytes([0x12, 0x34]))
 
 # -----------------------------
 # 6. CLEANUP
