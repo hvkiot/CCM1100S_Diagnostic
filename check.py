@@ -113,47 +113,61 @@ def uds_read_did(did):
 
 
 def uds_send(payload):
-    # Determine length
     length = len(payload)
 
-    # -------- Single Frame --------
+    # ---- Single Frame ----
     if length <= 7:
         data = bytes([length]) + payload + bytes(7 - length)
         send_request(data)
+        return uds_receive_response()
 
-    # -------- First Frame --------
+    # ---- First Frame ----
+    first_len = min(6, length)
+    ff = bytes([
+        0x10 | ((length >> 8) & 0x0F),
+        length & 0xFF
+    ]) + payload[:first_len]
+
+    ff += bytes(8 - len(ff))
+    send_request(ff)
+
+    # Wait for Flow Control
+    fc = recv_frame()
+    if not fc or (fc[0] >> 4) != 3:
+        print("No Flow Control received")
+        return None
+
+    blocksize = fc[1]
+    stmin_raw = fc[2]
+
+    # 🔥 Convert STmin
+    if stmin_raw <= 0x7F:
+        stmin = stmin_raw / 1000.0   # milliseconds → seconds
+    elif 0xF1 <= stmin_raw <= 0xF9:
+        stmin = (stmin_raw - 0xF0) / 10000.0  # microseconds
     else:
-        first_len = min(6, length)
-        ff = bytes([
-            0x10 | ((length >> 8) & 0x0F),
-            length & 0xFF
-        ]) + payload[:first_len]
+        stmin = 0
 
-        ff += bytes(8 - len(ff))
-        send_request(ff)
+    print(f"Using STmin: {stmin}s")
 
-        # Wait for FC
-        fc = recv_frame()
-        if not fc or (fc[0] >> 4) != 3:
-            print("No Flow Control received")
-            return None
+    # ---- Send Consecutive Frames ----
+    seq = 1
+    idx = first_len
 
-        # Send Consecutive Frames
-        seq = 1
-        idx = first_len
+    while idx < length:
+        chunk = payload[idx:idx+7]
 
-        while idx < length:
-            chunk = payload[idx:idx+7]
-            cf = bytes([0x20 | (seq & 0x0F)]) + chunk
-            cf += bytes(8 - len(cf))
+        cf = bytes([0x20 | (seq & 0x0F)]) + chunk
+        cf += bytes(8 - len(cf))
 
-            send_request(cf)
+        send_request(cf)
 
-            idx += len(chunk)
-            seq = (seq + 1) % 16
-            time.sleep(0.001)
+        idx += len(chunk)
+        seq = (seq + 1) % 16
 
-    # Receive response (reuse your logic)
+        # 🔥 Respect ECU timing
+        time.sleep(stmin)
+
     return uds_receive_response()
 
 # -----------------------------
