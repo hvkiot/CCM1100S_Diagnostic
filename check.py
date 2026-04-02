@@ -303,7 +303,7 @@ uds_send(bytes([0x10, 0x03]))
 
 if uds_security_access():
     # 3. Write VIN
-    write_vin("TESTVIN123456789")
+    write_vin("ABCDEFGHIJKLMNOPQ")
 
 # -----------------------------
 # 6. CLEANUP
