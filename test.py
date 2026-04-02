@@ -9,7 +9,11 @@ import threading
 bus = can.interface.Bus(
     interface='socketcan',
     channel='can1',
-    bitrate=250000
+    bitrate=250000,
+    can_filters=[
+        {"can_id": 0x1BDA08F1, "can_mask": 0x1FFFFFFF, "extended": True},
+        {"can_id": 0x1BDAF108, "can_mask": 0x1FFFFFFF, "extended": True},
+    ]
 )
 
 # -----------------------------
@@ -19,8 +23,10 @@ bus = can.interface.Bus(
 
 class DebugListener(can.Listener):
     def on_message_received(self, msg):
-        direction = "RX"
-        print(f"[{direction}] ID: {hex(msg.arbitration_id)}  DATA: {msg.data.hex()}")
+        if msg.arbitration_id in (0x1BDA08F1, 0x1BDAF108):
+            direction = "TX" if msg.arbitration_id == 0x1BDA08F1 else "RX"
+            print(
+                f"[{direction}] ID: {hex(msg.arbitration_id)}  DATA: {msg.data.hex()}")
 
 
 notifier = can.Notifier(bus, [DebugListener()])
