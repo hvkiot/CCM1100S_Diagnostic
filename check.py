@@ -255,6 +255,7 @@ def calculate_key(seed):
     if len(seed) != 16:
         raise ValueError("Seed must be 16 bytes")
 
+    seed = seed[::-1]
     cipher = AES.new(SECRET_KEY, AES.MODE_ECB)
     key = cipher.encrypt(seed)
 
