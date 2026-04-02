@@ -236,6 +236,10 @@ def uds_write_did(did, data_bytes):
     elif resp[0] == 0x7F:
         print(f"Negative Response: NRC=0x{resp[2]:02X}")
 
+# -----------------------------
+# 8. SECURITY ACCESS
+# -----------------------------
+
 
 def uds_security_access():
     print("\n--- Security Access ---")
@@ -264,6 +268,10 @@ def uds_security_access():
         print("Security failed ❌")
         return False
 
+# -----------------------------
+# 9. CALCULATE KEY
+# -----------------------------
+
 
 def calculate_key(seed):
     if len(seed) != 16:
@@ -273,6 +281,10 @@ def calculate_key(seed):
     key = cipher.encrypt(seed)
 
     return key
+
+# -----------------------------
+# 10. WRITE VIN
+# -----------------------------
 
 
 def write_vin(vin):
@@ -285,23 +297,41 @@ def write_vin(vin):
 
     uds_write_did(0xF190, data)
 
+
 # -----------------------------
-# 8. TEST
+# 11. TEST
 # -----------------------------
 
-DiD = str(input("Enter DID: "))
+# ---- Input ----
+did_input = input("Enter DID (e.g., F190): ").strip()
+value = input("Enter Value: ").strip()
 
-Value = str(input("Enter Value: "))
-print(f"\n--- Read DID {DiD} ---")
-uds_read_did(DiD)
+# ---- Convert DID ----
+try:
+    did = int(did_input, 16)
+except ValueError:
+    print("Invalid DID format")
+    exit()
 
-print("\n--- Write DID 0xF190 ---")
+# ---- Session ----
 uds_send(bytes([0x10, 0x03]))
 
+# ---- Security ----
 if uds_security_access():
-    # 3. Write VIN
-    write_vin(Value)
 
+    # ---- Write ----
+    print(f"\n--- Write DID 0x{did:04X} ---")
+
+    if did == 0xF190:
+        # VIN must be ASCII 17 chars
+        write_vin(value)
+    else:
+        # Generic write (hex input expected)
+        try:
+            data = bytes.fromhex(value)
+            uds_write_did(did, data)
+        except ValueError:
+            print("Invalid hex data for write")
 # -----------------------------
 # 6. CLEANUP
 # -----------------------------
