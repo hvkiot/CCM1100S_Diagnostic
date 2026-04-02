@@ -4,14 +4,13 @@ from udsoncan.client import Client
 from udsoncan import services
 from udsoncan.connections import IsoTPSocketConnection
 
-# Fix deprecation warning - use 'interface' instead of 'bustype'
 bus = can.interface.Bus(interface='socketcan', channel='can0', bitrate=500000)
 
-# Correct isotp addressing for your IDs
+# Use 29-bit extended addressing
 tp_addr = isotp.Address(
-    txid=0x1BDA08F1,   # Your request ID
-    rxid=0x1BDAF108,   # Your response ID
-    addressing_mode=isotp.AddressingMode.Normal_11bits
+    txid=0x1BDA08F1,
+    rxid=0x1BDAF108,
+    addressing_mode=isotp.AddressingMode.Normal_29bits  # Changed to 29bits
 )
 
 stack = isotp.CanStack(bus, address=tp_addr)
