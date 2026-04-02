@@ -288,22 +288,19 @@ def write_vin(vin):
 # -----------------------------
 # 8. TEST
 # -----------------------------
-# print("\n--- Single Frame DID 0x220F ---")
-# uds_read_did(0x220F)
 
-# print("\n--- Multi Frame DID 0xF191 ---")
-# uds_read_did(0xF191)
+DiD = str(input("Enter DID: "))
 
-
-print("\n--- Read DID 0xF190 ---")
-uds_read_did(0xF190)
+Value = str(input("Enter Value: "))
+print(f"\n--- Read DID {DiD} ---")
+uds_read_did(DiD)
 
 print("\n--- Write DID 0xF190 ---")
 uds_send(bytes([0x10, 0x03]))
 
 if uds_security_access():
     # 3. Write VIN
-    write_vin("ABCDEFGHIJKLMNOPQ")
+    write_vin(Value)
 
 # -----------------------------
 # 6. CLEANUP
