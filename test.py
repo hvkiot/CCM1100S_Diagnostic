@@ -1,6 +1,6 @@
 import can
 import isotp
-from udsoncan import Client
+from udsoncan.client import Client
 from udsoncan import services
 from udsoncan.connections import IsoTPSocketConnection
 
