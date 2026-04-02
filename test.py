@@ -10,6 +10,7 @@ bus = can.interface.Bus(
     interface='socketcan',
     channel='can1',
     bitrate=250000,
+    receive_own_messages=False,
     can_filters=[
         {"can_id": 0x1BDA08F1, "can_mask": 0x1FFFFFFF, "extended": True},
         {"can_id": 0x1BDAF108, "can_mask": 0x1FFFFFFF, "extended": True},
@@ -68,9 +69,9 @@ def uds_request(payload, timeout=2):
     start_time = time.time()
 
     while True:
-        stack.process()
+        # CRITICAL: prevent blocking inside isotp
+        stack.process(rx_timeout=0)
 
-        # Debug: print internal ISO-TP state
         if stack.available():
             response = stack.recv()
             print(f"Final Response: {response.hex()}")
