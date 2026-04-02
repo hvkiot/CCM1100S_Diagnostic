@@ -1,24 +1,22 @@
 import can
 import isotp
-from udsoncan.client import Client
-from udsoncan.connections import PythonIsoTpConnection
-from udsoncan import configs
+import time
 
 # -----------------------------
-# 1. CAN BUS SETUP (Raspberry Pi SocketCAN)
+# 1. CAN BUS SETUP
 # -----------------------------
 bus = can.interface.Bus(
-    interface='socketcan',   # ✅ updated (no deprecation warning)
+    interface='socketcan',
     channel='can1',
     bitrate=250000
 )
 
 # -----------------------------
-# 2. ISO-TP ADDRESSING (29-bit IDs)
+# 2. ISO-TP ADDRESS (29-bit)
 # -----------------------------
-tp_addr = isotp.Address(
+address = isotp.Address(
     isotp.AddressingMode.Normal_29bits,
-    txid=0x1BDA08F1,   # Tester → ECU (RAS)
+    txid=0x1BDA08F1,   # Tester → ECU
     rxid=0x1BDAF108    # ECU → Tester
 )
 
@@ -27,54 +25,57 @@ tp_addr = isotp.Address(
 # -----------------------------
 stack = isotp.CanStack(
     bus=bus,
-    address=tp_addr,
+    address=address,
     params={
-        'stmin': 32,        # separation time (can tune)
+        'stmin': 32,
         'blocksize': 8,
         'wftmax': 0,
     }
 )
 
-conn = PythonIsoTpConnection(stack)
+# -----------------------------
+# Helper: send UDS request
+# -----------------------------
+
+
+def uds_request(payload):
+    print(f"\nSending: {payload.hex()}")
+
+    stack.send(payload)
+
+    # wait until response is ready
+    while True:
+        stack.process()
+        if stack.available():
+            response = stack.recv()
+            print(f"Received: {response.hex()}")
+            return response
+        time.sleep(0.01)
 
 # -----------------------------
-# 4. UDS CLIENT CONFIG
+# 4. TEST DIDs
 # -----------------------------
-config = configs.default_client_config.copy()
 
-# Disable strict DID decoding (IMPORTANT FIX)
-config['data_identifiers'] = {}
+
+# ---- Single Frame DID (0x220F) ----
+resp_220F = uds_request(bytes([0x22, 0x22, 0x0F]))
+
+# ---- Multi Frame DID (0xF191) ----
+resp_F191 = uds_request(bytes([0x22, 0xF1, 0x91]))
 
 # -----------------------------
-# 5. RUN TEST
+# 5. OPTIONAL: decode VIN
 # -----------------------------
-with Client(conn, request_timeout=2, config=config) as client:
-
-    print("\n--- Testing Single Frame DID (0x220F) ---")
+if resp_F191 and resp_F191[0] == 0x62:
+    vin_bytes = resp_F191[3:]   # skip 62 F1 91
     try:
-        response = client.read_data_by_identifier(0x220F)
-        print("Raw response (hex):", response.original_payload.hex())
-    except Exception as e:
-        print("Error:", e)
-
-    print("\n--- Testing Multi Frame DID (0xF191) ---")
-    try:
-        response = client.read_data_by_identifier(0xF191)
-        print("Raw response (hex):", response.original_payload.hex())
-
-        # Optional: try decode as ASCII (VIN usually)
-        try:
-            ascii_data = bytes.fromhex(response.original_payload.hex()[
-                                       6:]).decode('ascii', errors='ignore')
-            print("Decoded ASCII:", ascii_data)
-        except:
-            pass
-
-    except Exception as e:
-        print("Error:", e)
+        vin = vin_bytes.decode('ascii', errors='ignore')
+        print("Decoded VIN:", vin)
+    except:
+        pass
 
 # -----------------------------
-# 6. CLEAN SHUTDOWN
+# 6. CLEANUP
 # -----------------------------
 bus.shutdown()
-print("\nCAN bus shutdown complete.")
+print("\nCAN shutdown done.")
