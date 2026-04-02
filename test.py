@@ -1,111 +1,129 @@
 import can
-import isotp
 import time
-import threading
 
 # -----------------------------
-# 1. CAN BUS SETUP
+# 1. CAN SETUP
 # -----------------------------
 bus = can.interface.Bus(
     interface='socketcan',
     channel='can1',
-    bitrate=250000,
-    receive_own_messages=False,
-    can_filters=[
-        {"can_id": 0x1BDA08F1, "can_mask": 0x1FFFFFFF, "extended": True},
-        {"can_id": 0x1BDAF108, "can_mask": 0x1FFFFFFF, "extended": True},
-    ]
+    bitrate=250000
 )
 
-# -----------------------------
-# 2. DEBUG LISTENER (prints all CAN frames)
-# -----------------------------
-
-
-class DebugListener(can.Listener):
-    def on_message_received(self, msg):
-        if msg.arbitration_id in (0x1BDA08F1, 0x1BDAF108):
-            direction = "TX" if msg.arbitration_id == 0x1BDA08F1 else "RX"
-            print(
-                f"[{direction}] ID: {hex(msg.arbitration_id)}  DATA: {msg.data.hex()}")
-
-
-notifier = can.Notifier(bus, [DebugListener()])
+TX_ID = 0x1BDA08F1
+RX_ID = 0x1BDAF108
 
 # -----------------------------
-# 3. ISO-TP ADDRESS (29-bit)
-# -----------------------------
-address = isotp.Address(
-    isotp.AddressingMode.Normal_29bits,
-    txid=0x1BDA08F1,
-    rxid=0x1BDAF108
-)
-
-# -----------------------------
-# 4. ISO-TP STACK
-# -----------------------------
-stack = isotp.CanStack(
-    bus=bus,
-    address=address,
-    params={
-        'stmin': 0,        # IMPORTANT: allow fastest FC
-        'blocksize': 8,
-        'wftmax': 0,
-        'tx_padding': 0x00,
-        'rx_flowcontrol_timeout': 1000,
-        'rx_consecutive_frame_timeout': 1000,
-    }
-)
-
-# -----------------------------
-# Helper: send UDS request
+# 2. SEND UDS REQUEST
 # -----------------------------
 
 
-def uds_request(payload, timeout=2):
-    print(f"\nSending UDS: {payload.hex()}")
+def send_request(data):
+    msg = can.Message(
+        arbitration_id=TX_ID,
+        data=data,
+        is_extended_id=True
+    )
+    bus.send(msg)
+    print(f"[TX] {hex(TX_ID)} {data.hex()}")
 
-    stack.send(payload)
-    start_time = time.time()
+# -----------------------------
+# 3. RECEIVE FRAME (filtered)
+# -----------------------------
 
-    while True:
-        # CRITICAL: prevent blocking inside isotp
-        stack.process(rx_timeout=0)
 
-        if stack.available():
-            response = stack.recv()
-            print(f"Final Response: {response.hex()}")
-            return response
+def recv_frame(timeout=1):
+    start = time.time()
+    while time.time() - start < timeout:
+        msg = bus.recv(0.01)
+        if msg and msg.arbitration_id == RX_ID:
+            print(f"[RX] {hex(msg.arbitration_id)} {msg.data.hex()}")
+            return msg.data
+    return None
 
-        if (time.time() - start_time) > timeout:
-            print("Timeout waiting for response")
-            return None
+# -----------------------------
+# 4. MANUAL ISO-TP RECEIVE
+# -----------------------------
+
+
+def uds_read_did(did):
+    # Send request (single frame)
+    payload = bytes([0x03, 0x22, (did >> 8) & 0xFF, did & 0xFF, 0, 0, 0, 0])
+    send_request(payload)
+
+    # Wait for First Frame
+    data = recv_frame()
+    if not data:
+        print("No response")
+        return
+
+    pci_type = data[0] >> 4
+
+    # -------------------------
+    # SINGLE FRAME
+    # -------------------------
+    if pci_type == 0:
+        length = data[0] & 0x0F
+        response = data[1:1+length]
+        print("Final:", response.hex())
+        return response
+
+    # -------------------------
+    # FIRST FRAME (MULTI)
+    # -------------------------
+    elif pci_type == 1:
+        total_len = ((data[0] & 0x0F) << 8) | data[1]
+        response = data[2:]
+
+        print(f"First Frame received. Total length: {total_len}")
+
+        # 🔥 Send Flow Control IMMEDIATELY
+        fc = can.Message(
+            arbitration_id=TX_ID,
+            data=bytes([0x30, 0x00, 0x00, 0, 0, 0, 0, 0]),
+            is_extended_id=True
+        )
+        bus.send(fc)
+        print(f"[TX] FC {fc.data.hex()}")
+
+        # Receive Consecutive Frames
+        while len(response) < total_len:
+            cf = recv_frame()
+            if not cf:
+                print("Timeout waiting CF")
+                return
+
+            if (cf[0] >> 4) == 2:
+                response += cf[1:]
+
+        response = response[:total_len]
+        print("Final:", response.hex())
+        return response
+
+    else:
+        print("Unexpected frame")
+        return
+
 
 # -----------------------------
 # 5. TEST
 # -----------------------------
+print("\n--- Single Frame DID 0x220F ---")
+uds_read_did(0x220F)
 
+print("\n--- Multi Frame DID 0xF191 ---")
+resp = uds_read_did(0xF191)
 
-# Single frame
-resp_220F = uds_request(bytes([0x22, 0x22, 0x0F]))
-
-# Multi-frame
-resp_F191 = uds_request(bytes([0x22, 0xF1, 0x91]))
-
-# -----------------------------
-# 6. OPTIONAL VIN decode
-# -----------------------------
-if resp_F191 and resp_F191[0] == 0x62:
-    vin_bytes = resp_F191[3:]
+# Try ASCII decode (VIN)
+if resp and resp[0] == 0x62:
     try:
-        vin = vin_bytes.decode('ascii', errors='ignore')
+        vin = resp[3:].decode('ascii', errors='ignore')
         print("Decoded VIN:", vin)
     except:
         pass
 
 # -----------------------------
-# 7. CLEANUP
+# 6. CLEANUP
 # -----------------------------
-notifier.stop()
 bus.shutdown()
 print("\nCAN shutdown done.")
