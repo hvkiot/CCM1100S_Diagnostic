@@ -115,12 +115,12 @@ print("\n--- Multi Frame DID 0xF191 ---")
 resp = uds_read_did(0xF191)
 
 # Try ASCII decode (VIN)
-if resp and resp[0] == 0x62:
-    try:
-        vin = resp[3:].decode('ascii', errors='ignore')
-        print("Decoded VIN:", vin)
-    except:
-        pass
+# if resp and resp[0] == 0x62:
+#     try:
+#         vin = resp[3:].decode('ascii', errors='ignore')
+#         print("Decoded VIN:", vin)
+#     except:
+#         pass
 
 # -----------------------------
 # 6. CLEANUP
