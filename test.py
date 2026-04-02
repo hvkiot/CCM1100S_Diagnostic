@@ -6,15 +6,17 @@ from udsoncan.connections import IsoTPSocketConnection
 
 bus = can.interface.Bus(interface='socketcan', channel='can0', bitrate=500000)
 
-# Use 29-bit extended addressing
 tp_addr = isotp.Address(
     txid=0x1BDA08F1,
     rxid=0x1BDAF108,
-    addressing_mode=isotp.AddressingMode.Normal_29bits  # Changed to 29bits
+    addressing_mode=isotp.AddressingMode.Normal_29bits
 )
 
 stack = isotp.CanStack(bus, address=tp_addr)
-uds_conn = IsoTPSocketConnection(stack)
+
+# Fix: Add the missing address parameter
+uds_conn = IsoTPSocketConnection(stack, address=tp_addr)
+
 uds_conn.open()
 
 client = Client(uds_conn, request_timeout=2)
