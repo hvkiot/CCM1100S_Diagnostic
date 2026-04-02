@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+RAPS/
+RAPS311/
+
+# Logs
+logs/
+*.log
+
+# Data
+*.csv
+*.json
+*.db
+*.sqlite
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Config secrets
+.streamlit/secrets.toml
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit cache
+.streamlit/cache/
