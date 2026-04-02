@@ -70,9 +70,10 @@ def uds_request(payload, timeout=2):
     while True:
         stack.process()
 
+        # Debug: print internal ISO-TP state
         if stack.available():
             response = stack.recv()
-            print(f"\nFinal Reassembled Response: {response.hex()}")
+            print(f"Final Response: {response.hex()}")
             return response
 
         if (time.time() - start_time) > timeout:
