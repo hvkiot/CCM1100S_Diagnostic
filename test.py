@@ -27,9 +27,12 @@ stack = isotp.CanStack(
     bus=bus,
     address=address,
     params={
-        'stmin': 32,
+        'stmin': 0,        # IMPORTANT: allow fastest FC
         'blocksize': 8,
         'wftmax': 0,
+        'tx_padding': 0x00,
+        'rx_flowcontrol_timeout': 1000,
+        'rx_consecutive_frame_timeout': 1000,
     }
 )
 
@@ -38,19 +41,24 @@ stack = isotp.CanStack(
 # -----------------------------
 
 
-def uds_request(payload):
+def uds_request(payload, timeout=2):
     print(f"\nSending: {payload.hex()}")
 
     stack.send(payload)
 
-    # wait until response is ready
+    start_time = time.time()
+
     while True:
-        stack.process()
+        stack.process()  # MUST run continuously (no long sleep)
+
         if stack.available():
             response = stack.recv()
             print(f"Received: {response.hex()}")
             return response
-        time.sleep(0.01)
+
+        if (time.time() - start_time) > timeout:
+            print("Timeout waiting for response")
+            return None
 
 # -----------------------------
 # 4. TEST DIDs
