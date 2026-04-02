@@ -250,23 +250,13 @@ def uds_security_access():
         print("Security failed ❌")
         return False
 
-def swap32(data):
-    return b''.join([
-        data[i:i+4][::-1] for i in range(0, len(data), 4)
-    ])
-
 
 def calculate_key(seed):
-    # 🔥 Step 1: swap 32-bit words
-    seed = swap32(seed)
+    if len(seed) != 16:
+        raise ValueError("Seed must be 16 bytes")
 
     cipher = AES.new(SECRET_KEY, AES.MODE_ECB)
-
-    # 🔥 Step 2: encrypt
     key = cipher.encrypt(seed)
-
-    # 🔥 Step 3: swap again (VERY common)
-    key = swap32(key)
 
     return key
 
