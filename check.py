@@ -1,5 +1,6 @@
 import can
 import time
+from Crypto.Cipher import AES
 
 # -----------------------------
 # 1. CAN SETUP
@@ -12,6 +13,8 @@ bus = can.interface.Bus(
 
 TX_ID = 0x1BDA08F1
 RX_ID = 0x1BDAF108
+
+SECRET_KEY = b"TCHRMVHA2BPX3ULC"
 
 # -----------------------------
 # 2. SEND UDS REQUEST
@@ -220,20 +223,69 @@ def uds_write_did(did, data_bytes):
         print(f"Negative Response: NRC=0x{resp[2]:02X}")
 
 
+def uds_security_access():
+    print("\n--- Security Access ---")
+
+    # Step 1: request seed
+    resp = uds_send(bytes([0x27, 0x01]))
+
+    if not resp or resp[0] != 0x67:
+        print("Failed to get seed")
+        return False
+
+    seed = resp[2:]
+    print("Seed:", seed.hex())
+
+    # Step 2: calculate key
+    key = calculate_key(seed)
+    print("Key:", key.hex())
+
+    # Step 3: send key
+    resp = uds_send(bytes([0x27, 0x02]) + key)
+
+    if resp and resp[0] == 0x67:
+        print("Security unlocked ✅")
+        return True
+    else:
+        print("Security failed ❌")
+        return False
+
+
+def calculate_key(seed):
+    if len(seed) != 16:
+        raise ValueError("Seed must be 16 bytes")
+
+    cipher = AES.new(SECRET_KEY, AES.MODE_ECB)
+    key = cipher.encrypt(seed)
+
+    return key
+
+
+def write_vin(vin):
+    if len(vin) != 17:
+        print("VIN must be 17 characters")
+        return
+
+    data = vin.encode('ascii')
+
+    uds_write_did(0xF190, data)
+
 # -----------------------------
 # 8. TEST
 # -----------------------------
-print("\n--- Single Frame DID 0x220F ---")
-uds_read_did(0x220F)
+# print("\n--- Single Frame DID 0x220F ---")
+# uds_read_did(0x220F)
 
-print("\n--- Multi Frame DID 0xF191 ---")
-uds_read_did(0xF191)
+# print("\n--- Multi Frame DID 0xF191 ---")
+# uds_read_did(0xF191)
 
-print("\n--- Write DID 0x220F ---")
+
+print("\n--- Write DID 0xF190 ---")
 uds_send(bytes([0x10, 0x03]))
 
-# Try writing (example data)
-uds_write_did(0x220F, bytes([0x12, 0x34]))
+if uds_security_access():
+    # 3. Write VIN
+    write_vin("TESTVIN123456789")
 
 # -----------------------------
 # 6. CLEANUP
