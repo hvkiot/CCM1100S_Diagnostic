@@ -280,12 +280,15 @@ def write_vin(vin):
 # uds_read_did(0xF191)
 
 
+print("\n--- Read DID 0xF190 ---")
+uds_read_did(0xF190)
+
 print("\n--- Write DID 0xF190 ---")
 uds_send(bytes([0x10, 0x03]))
 
 if uds_security_access():
     # 3. Write VIN
-    write_vin("TESTVIN1234567890")
+    write_vin("TESTVIN123456789")
 
 # -----------------------------
 # 6. CLEANUP
