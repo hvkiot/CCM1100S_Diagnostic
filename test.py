@@ -1,6 +1,7 @@
 import can
 import isotp
-from udsoncan import Client, services
+from udsoncan import Client
+from udsoncan import services
 from udsoncan.connections import IsoTPSocketConnection
 
 # CAN bus setup
