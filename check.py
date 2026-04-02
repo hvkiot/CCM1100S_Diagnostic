@@ -262,8 +262,9 @@ def calculate_key(seed):
 
 
 def write_vin(vin):
+    vin = vin.strip()
     if len(vin) != 17:
-        print("VIN must be 17 characters")
+        print(f"VIN must be 17 characters, got {len(vin)}")
         return
 
     data = vin.encode('ascii')
