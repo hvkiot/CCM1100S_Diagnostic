@@ -1,8 +1,6 @@
-from udsoncan.transport import TransportLayer
 import can
 import isotp
 from udsoncan.client import Client
-from udsoncan import services
 
 bus = can.interface.Bus(interface='socketcan', channel='can1', bitrate=250000)
 
@@ -12,25 +10,22 @@ tp_addr = isotp.Address(
     addressing_mode=isotp.AddressingMode.Normal_29bits
 )
 
-# Create isotp transport layer directly
 stack = isotp.CanStack(bus, address=tp_addr)
 
-# Use the stack as the transport layer for udsoncan
 
-
-class IsotpTransport(TransportLayer):
+class SimpleUDSConnection:
     def __init__(self, stack):
         self.stack = stack
 
-    def send(self, payload):
-        self.stack.send(payload)
+    def send(self, data):
+        self.stack.send(bytes(data))
 
     def receive(self, timeout=2):
         return self.stack.receive(timeout)
 
 
-transport = IsotpTransport(stack)
-client = Client(transport, request_timeout=2)
+conn = SimpleUDSConnection(stack)
+client = Client(conn, timeout=2)
 
 # Test your DIDs
 response_220f = client.read_data_by_identifier(0x220F)
