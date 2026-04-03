@@ -1,153 +1,229 @@
 #!/usr/bin/env python3
-import asyncio
+"""
+BLE Server using BlueZ D-Bus API
+Implements GATT Service for UDS communication
+"""
+
+import dbus
+import dbus.service
+import dbus.mainloop.glib
+from gi.repository import GLib
 import json
-from dbus_next.aio import MessageBus
-from dbus_next.service import ServiceInterface, method, dbus_property, signal
-from dbus_next.constants import PropertyAccess, BusType
-from dbus_next import Variant, DBusError
+import threading
+import asyncio
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# UUIDs for our service (matching your Flutter app)
 SERVICE_UUID = "12345678-1234-1234-1234-123456789ABC"
 CHARACTERISTIC_UUID = "87654321-4321-4321-4321-CBA987654321"
 
 
-class UDSCharacteristic(ServiceInterface):
-    """BLE Characteristic for UDS commands"""
+class UDSCharacteristic(dbus.service.Object):
+    """GATT Characteristic for UDS commands"""
 
-    def __init__(self, command_handler, service_path):
-        super().__init__('org.bluez.GattCharacteristic1')
+    def __init__(self, bus, index, command_handler):
+        self.path = f"/org/bluez/hci0/service0/char{index}"
+        self.bus = bus
         self.command_handler = command_handler
-        self.service_path = service_path
         self.notifying = False
 
-    @dbus_property(access=PropertyAccess.READ)
-    def UUID(self) -> 's':
-        return CHARACTERISTIC_UUID
+        dbus.service.Object.__init__(self, bus, self.path)
 
-    @dbus_property(access=PropertyAccess.READ)
-    def Service(self) -> 'o':
-        return self.service_path
+    @dbus.service.method('org.bluez.GattCharacteristic1',
+                         in_signature='a{sv}', out_signature='ay')
+    def ReadValue(self, options):
+        """Handle read requests from client"""
+        try:
+            status = self.command_handler.get_status()
+            value = json.dumps(status).encode('utf-8')
+            logger.debug(f"BLE read: {status}")
+            return dbus.Array(value, signature='y')
+        except Exception as e:
+            logger.error(f"Read error: {e}")
+            return dbus.Array([], signature='y')
 
-    @dbus_property(access=PropertyAccess.READ)
-    def Flags(self) -> 'as':
-        return ['read', 'write', 'notify']
-
-    @method()
-    def ReadValue(self, options: 'a{sv}') -> 'ay':
-        """Handle read requests"""
-        status = self.command_handler.get_status()
-        return list(json.dumps(status).encode('utf-8'))
-
-    @method()
-    def WriteValue(self, value: 'ay', options: 'a{sv}'):
-        """Handle write requests"""
+    @dbus.service.method('org.bluez.GattCharacteristic1',
+                         in_signature='aya{sv}', out_signature='')
+    def WriteValue(self, value, options):
+        """Handle write requests from client"""
         try:
             data = bytes(value)
             message = json.loads(data.decode('utf-8'))
-            logger.info(f"Received command: {message.get('command')}")
+            logger.info(f"BLE command received: {message.get('command')}")
 
-            # Process command
-            asyncio.create_task(self._process_command(message))
+            # Process in background thread
+            thread = threading.Thread(
+                target=self._process_command,
+                args=(message,),
+                daemon=True
+            )
+            thread.start()
 
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON: {e}")
         except Exception as e:
             logger.error(f"Write error: {e}")
 
-    @method()
+    @dbus.service.method('org.bluez.GattCharacteristic1',
+                         in_signature='', out_signature='')
     def StartNotify(self):
         """Start notifications"""
         self.notifying = True
-        logger.info("Notifications started")
+        logger.info("BLE notifications started")
 
-    @method()
+    @dbus.service.method('org.bluez.GattCharacteristic1',
+                         in_signature='', out_signature='')
     def StopNotify(self):
         """Stop notifications"""
         self.notifying = False
-        logger.info("Notifications stopped")
+        logger.info("BLE notifications stopped")
 
-    @signal()
-    def Notify(self, value: 'ay'):
-        """Send notification"""
-        pass
-
-    async def _process_command(self, message):
+    def _process_command(self, message):
         """Process command and send notification"""
         try:
-            response = await self.command_handler.handle_command(message)
-            response_bytes = json.dumps(response).encode('utf-8')
+            # Create new event loop for async
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            response = loop.run_until_complete(
+                self.command_handler.handle_command(message)
+            )
+            loop.close()
 
+            # Send notification if enabled
             if self.notifying:
-                self.Notify(list(response_bytes))
+                response_bytes = json.dumps(response).encode('utf-8')
+                self.PropertiesChanged(
+                    'org.bluez.GattCharacteristic1',
+                    {'Value': dbus.Array(response_bytes, signature='y')},
+                    []
+                )
+                logger.debug(f"Notification sent: {response}")
 
         except Exception as e:
             logger.error(f"Command processing error: {e}")
 
+    @dbus.service.method('org.freedesktop.DBus.Properties',
+                         in_signature='ss', out_signature='v')
+    def Get(self, interface, prop):
+        """Get property value"""
+        if interface == 'org.bluez.GattCharacteristic1':
+            if prop == 'UUID':
+                return CHARACTERISTIC_UUID
+            elif prop == 'Flags':
+                return dbus.Array(['read', 'write', 'notify'], signature='s')
+            elif prop == 'Value':
+                return dbus.Array([], signature='y')
+        raise dbus.exceptions.DBusException(
+            'org.freedesktop.DBus.Error.InvalidArgs',
+            f"Property {prop} not found"
+        )
 
-class UDSService(ServiceInterface):
-    """Main UDS Service"""
+    @dbus.service.method('org.freedesktop.DBus.Properties',
+                         in_signature='sa{sv}as', out_signature='')
+    def PropertiesChanged(self, interface, changed, invalidated):
+        """Signal property changes"""
+        pass
 
-    def __init__(self, command_handler, service_path):
-        super().__init__('org.bluez.GattService1')
-        self.service_path = service_path
-        self.characteristic = UDSCharacteristic(command_handler, service_path)
 
-    @dbus_property(access=PropertyAccess.READ)
-    def UUID(self) -> 's':
-        return SERVICE_UUID
+class UDSService(dbus.service.Object):
+    """GATT Service for UDS"""
 
-    @dbus_property(access=PropertyAccess.READ)
-    def Primary(self) -> 'b':
-        return True
+    def __init__(self, bus, command_handler):
+        self.path = '/org/bluez/hci0/service0'
+        self.bus = bus
+        self.command_handler = command_handler
 
-    @dbus_property(access=PropertyAccess.READ)
-    def DeviceName(self) -> 's':
-        return "UDS-CAN-Bridge"
+        dbus.service.Object.__init__(self, bus, self.path)
+
+        # Create characteristic
+        self.characteristic = UDSCharacteristic(bus, 0, command_handler)
+
+    @dbus.service.method('org.freedesktop.DBus.Properties',
+                         in_signature='ss', out_signature='v')
+    def Get(self, interface, prop):
+        """Get property value"""
+        if interface == 'org.bluez.GattService1':
+            if prop == 'UUID':
+                return SERVICE_UUID
+            elif prop == 'Primary':
+                return True
+            elif prop == 'Characteristics':
+                return dbus.Array([self.characteristic.path], signature='o')
+        raise dbus.exceptions.DBusException(
+            'org.freedesktop.DBus.Error.InvalidArgs',
+            f"Property {prop} not found"
+        )
 
 
 class BLEServer:
-    """BLE Server using dbus-next"""
+    """BLE Server Manager"""
 
     def __init__(self, command_handler):
         self.command_handler = command_handler
-        self.bus = None
+        self.mainloop = None
+        self.service = None
+        self.application_path = '/org/bluez/hci0/service0'
 
-    async def start(self):
+    def start(self):
         """Start BLE server"""
         try:
-            # Connect to system bus
-            self.bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+            # Initialize D-Bus main loop
+            dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
 
-            # Fix: introspection should be None for auto-discovery
-            await self.bus.get_proxy_object(
-                'org.bluez',
-                '/org/bluez/hci0',
-                None
+            # Get system bus
+            bus = dbus.SystemBus()
+
+            # Get BlueZ adapter
+            adapter_obj = bus.get_object('org.bluez', '/org/bluez/hci0')
+            adapter = dbus.Interface(adapter_obj, 'org.bluez.Adapter1')
+
+            # Power on adapter
+            adapter.SetProperty('Powered', dbus.Boolean(True))
+            adapter.SetProperty('Alias', 'UDS-CAN-Bridge')
+            adapter.SetProperty('Discoverable', dbus.Boolean(True))
+
+            logger.info("Bluetooth adapter configured")
+
+            # Create GATT service
+            self.service = UDSService(bus, self.command_handler)
+
+            # Get GATT manager
+            gatt_manager = dbus.Interface(
+                bus.get_object('org.bluez', '/org/bluez/hci0'),
+                'org.bluez.GattManager1'
             )
 
-            # Create and register our service at a valid BlueZ path
-            service_path = '/org/bluez/hci0/service0'
-            char_path = f'{service_path}/char0'
-            
-            service = UDSService(self.command_handler, service_path)
+            # Register application
+            gatt_manager.RegisterApplication(
+                self.application_path,
+                {},
+                reply_handler=self._reg_success,
+                error_handler=self._reg_error
+            )
 
-            # Export the components
-            await self.bus.export(service_path, service)
-            await self.bus.export(char_path, service.characteristic)
+            logger.info(f"BLE Server started - Service: {SERVICE_UUID}")
+            logger.info(f"Characteristic: {CHARACTERISTIC_UUID}")
 
-            logger.info("BLE server started successfully")
-            logger.info(f"Service UUID: {SERVICE_UUID}")
-            logger.info(f"Characteristic UUID: {CHARACTERISTIC_UUID}")
-
-            # Keep running
-            await asyncio.Event().wait()
+            # Start GLib main loop
+            self.mainloop = GLib.MainLoop()
+            self.mainloop.run()
 
         except Exception as e:
             logger.error(f"BLE server error: {e}")
             raise
 
-    async def stop(self):
+    def _reg_success(self):
+        """Registration success callback"""
+        logger.info("GATT application registered successfully")
+
+    def _reg_error(self, error):
+        """Registration error callback"""
+        logger.error(f"Failed to register GATT application: {error}")
+
+    def stop(self):
         """Stop BLE server"""
-        if self.bus:
-            self.bus.disconnect()
-            logger.info("BLE server stopped")
+        if self.mainloop:
+            self.mainloop.quit()
+        logger.info("BLE server stopped")
