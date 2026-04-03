@@ -180,9 +180,17 @@ class BLEServer:
             adapter = dbus.Interface(adapter_obj, 'org.bluez.Adapter1')
 
             # Power on adapter
-            adapter.SetProperty('Powered', dbus.Boolean(True))
-            adapter.SetProperty('Alias', 'UDS-CAN-Bridge')
-            adapter.SetProperty('Discoverable', dbus.Boolean(True))
+            # Access the standard D-Bus Properties interface
+            adapter_props = dbus.Interface(
+                adapter_obj, 'org.freedesktop.DBus.Properties')
+
+            # Set properties using the correct modern interface
+            adapter_props.Set('org.bluez.Adapter1',
+                              'Powered', dbus.Boolean(True))
+            adapter_props.Set('org.bluez.Adapter1', 'Alias',
+                              dbus.String('UDS-CAN-Bridge'))
+            adapter_props.Set('org.bluez.Adapter1',
+                              'Discoverable', dbus.Boolean(True))
 
             logger.info("Bluetooth adapter configured")
 
