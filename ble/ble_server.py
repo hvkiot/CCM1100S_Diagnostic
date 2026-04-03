@@ -140,12 +140,15 @@ class GATTApplication(ServiceInterface):
                         'Flags': Variant('as', c.flags)
                     }
                 }
-            for d in c.descriptors:  # You may need to add a descriptors list to your Char class
-                res[d.path] = {
+                # --- ADD THIS BLOCK ---
+                # Assuming you added a list or attribute to 'char' to hold descriptors
+                # or just hardcode the reference if you only have one
+                descriptor_path = f"{c.path}/desc0"
+                res[descriptor_path] = {
                     'org.bluez.GattDescriptor1': {
-                        'UUID': Variant('s', d.uuid),
+                        'UUID': Variant('s', '00002902-0000-1000-8000-00805f9b34fb'),
                         'Characteristic': Variant('o', c.path),
-                        'Flags': Variant('as', d.flags)
+                        'Flags': Variant('as', ['read', 'write'])
                     }
                 }
         return res
