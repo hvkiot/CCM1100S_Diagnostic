@@ -38,8 +38,6 @@ class LEAdvertisement(ServiceInterface):
 
 
 class GATTCharacteristic(ServiceInterface):
-    """Standard BlueZ GATT Characteristic"""
-
     def __init__(self, index, uuid, flags, service_path, command_handler):
         super().__init__('org.bluez.GattCharacteristic1')
         self.path = f"{service_path}/char{index}"
@@ -47,74 +45,47 @@ class GATTCharacteristic(ServiceInterface):
         self.flags = flags
         self.service_path = service_path
         self.command_handler = command_handler
-        self.notifying = False
-
-    @dbus_property(access=PropertyAccess.READ)
-    def UUID(self) -> 's':
-        return self.uuid
-
-    @dbus_property(access=PropertyAccess.READ)
-    def Service(self) -> 'o':
-        return self.service_path
-
-    @dbus_property(access=PropertyAccess.READ)
-    def Flags(self) -> 'as':
-        return self.flags
+        self.notifying = False  # Track if Flutter has enabled notifications
 
     @method()
-    def ReadValue(self, options: 'a{sv}') -> 'ay':
-        """Handle read requests"""
-        try:
-            status = self.command_handler.get_status()
-            return list(json.dumps(status).encode('utf-8'))
-        except Exception as e:
-            logger.error(f"ReadValue error: {e}")
-            return []
+    async def StartNotify(self):
+        if not self.notifying:
+            self.notifying = True
+            logger.info("🔔 Notifications started by Phone")
 
     @method()
-    def WriteValue(self, value: 'ay', options: 'a{sv}'):
-        """Handle write requests"""
-        try:
-            data = bytes(value)
-            message = json.loads(data.decode('utf-8'))
-            logger.info(f"Received command: {message.get('command')}")
-            asyncio.create_task(self._process_command(message))
-        except Exception as e:
-            logger.error(f"WriteValue error: {e}")
-
-    @method()
-    def StartNotify(self):
-        self.notifying = True
-        logger.info("Notifications started")
-
-    @method()
-    def StopNotify(self):
-        self.notifying = False
-        logger.info("Notifications stopped")
+    async def StopNotify(self):
+        if self.notifying:
+            self.notifying = False
+            logger.info("🔕 Notifications stopped by Phone")
 
     @signal()
-    def Notify(self, value: 'ay'):
-        pass
+    def Notify(self, value: 'ay') -> 'ay':
+        """This signal sends the actual BLE notification"""
+        return value
 
     async def _process_command(self, message):
         """Process command and send notification"""
         try:
             logger.info(f"Processing command: {message.get('command')}")
+            # Wait for your UDS logic to finish
             response = await self.command_handler.handle_command(message)
-            logger.info(f"Got response: {response}")
 
             if self.notifying:
-                response_bytes = json.dumps(response).encode('utf-8')
-                logger.info(
-                    f"Sending notification: {len(response_bytes)} bytes")
-                logger.info(f"Response content: {response_bytes[:100]}")
-                self.Notify(list(response_bytes))
-                logger.info("Notification sent successfully")
+                # 1. Convert dict to JSON string, then to bytes, then to a list
+                response_json = json.dumps(response)
+                response_bytes = list(response_json.encode('utf-8'))
+
+                # 2. TRIGGER THE SIGNAL (This sends it to Flutter)
+                self.Notify(response_bytes)
+
+                logger.info(f"✅ Notification sent: {response_json}")
             else:
-                logger.warning("Cannot send response: notifying is False")
+                logger.warning(
+                    "⚠️ Logic finished but 'notifying' is False. Is the app listening?")
 
         except Exception as e:
-            logger.error(f"Command processing error: {e}", exc_info=True)
+            logger.error(f"Command processing error: {e}")
 
 
 class GATTService(ServiceInterface):
