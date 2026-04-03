@@ -37,7 +37,7 @@ class ISOTPHandler:
     
     def _send_single_frame(self, payload: bytes, timeout: float) -> Optional[bytes]:
         """Send single frame message"""
-        data = bytes([length]) + payload + bytes(7 - len(payload))
+        data = bytes([len(payload)]) + payload + bytes(7 - len(payload))
         self.send_frame(data)
         return self._receive_response(timeout)
     
