@@ -213,6 +213,7 @@ class BLEServer:
 
     async def start(self):
         try:
+            await self._clean_stale_connections()
             self.bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
 
             # 1. Configure adapter first
@@ -271,6 +272,25 @@ class BLEServer:
         except Exception as e:
             logger.error(f"BLE server error: {e}")
             raise
+
+    async def _clean_stale_connections(self):
+        """Remove stale BLE connections"""
+        try:
+            import subprocess
+            # Get connected devices
+            result = subprocess.run(['bluetoothctl', 'devices'],
+                                    capture_output=True, text=True)
+            devices = result.stdout
+
+            # Remove all connected devices
+            for line in devices.split('\n'):
+                if 'Device' in line:
+                    addr = line.split(' ')[1]
+                    subprocess.run(['bluetoothctl', 'remove', addr],
+                                   capture_output=True)
+            logger.info("Cleaned stale connections")
+        except Exception as e:
+            logger.warning(f"Cleanup failed: {e}")
 
     async def stop(self):
         if self.bus:
