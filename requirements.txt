@@ -1,11 +1,11 @@
 # Core CAN communication (works on Python 3.13)
-python-can==4.4.2
+python-can
 
 # Cryptography for security access
-pycryptodome==3.20.0
+pycryptodome
 
 # Data validation (optional)
-pydantic==2.10.6
+pydantic
 
 # DBus for Bluetooth (system package, not pip)
 # dbus-python is installed via apt, not pip
