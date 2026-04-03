@@ -22,13 +22,13 @@ class UDSCharacteristic(ServiceInterface):
         self.notifying = False
 
     @method()
-    def ReadValue(self, options: dict) -> 'ay':
+    def ReadValue(self, options: 'a{sv}') -> 'ay':
         """Handle read requests"""
         status = self.command_handler.get_status()
         return list(json.dumps(status).encode('utf-8'))
 
     @method()
-    def WriteValue(self, value: 'ay', options: dict):
+    def WriteValue(self, value: 'ay', options: 'a{sv}'):
         """Handle write requests"""
         try:
             data = bytes(value)
