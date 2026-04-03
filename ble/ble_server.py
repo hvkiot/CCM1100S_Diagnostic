@@ -140,6 +140,14 @@ class GATTApplication(ServiceInterface):
                         'Flags': Variant('as', c.flags)
                     }
                 }
+            for d in c.descriptors:  # You may need to add a descriptors list to your Char class
+                res[d.path] = {
+                    'org.bluez.GattDescriptor1': {
+                        'UUID': Variant('s', d.uuid),
+                        'Characteristic': Variant('o', c.path),
+                        'Flags': Variant('as', d.flags)
+                    }
+                }
         return res
 
 
@@ -200,57 +208,67 @@ class BLEServer:
             await self._clean_stale_connections()
             self.bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
 
-            # 1. Configure adapter first
+            # 1. Configure Adapter
             introspection = await self.bus.introspect('org.bluez', '/org/bluez/hci0')
             bluez = self.bus.get_proxy_object(
                 'org.bluez', '/org/bluez/hci0', introspection)
-            adapter = bluez.get_interface('org.bluez.Adapter1')
             adapter_props = bluez.get_interface(
                 'org.freedesktop.DBus.Properties')
 
-            # Set adapter properties
             await adapter_props.call_set('org.bluez.Adapter1', 'Powered', Variant('b', True))
             await adapter_props.call_set('org.bluez.Adapter1', 'Alias', Variant('s', 'UDS-CAN-Bridge'))
             await adapter_props.call_set('org.bluez.Adapter1', 'Discoverable', Variant('b', True))
             logger.info("Bluetooth adapter configured")
 
-            # 2. Create and register Advertisement
+            # 2. Create Advertisement
             advertisement = LEAdvertisement()
             self.bus.export(advertisement.path, advertisement)
-
             le_advertising = bluez.get_interface(
                 'org.bluez.LEAdvertisingManager1')
             await le_advertising.call_register_advertisement(advertisement.path, {})
             logger.info("Advertisement registered")
 
-            # 3. Create GATT Service and Characteristic
-            service = GATTService(0, SERVICE_UUID, True)
-            char = GATTCharacteristic(0, CHARACTERISTIC_UUID,
-                                      ['read', 'write', 'notify'],
-                                      service.path, self.command_handler)
-            descriptor = CCCDescriptor(char.path)
-            service.add_characteristic(descriptor)
-
-            # 4. Create Application Root with ObjectManager
+            # 3. Build GATT Hierarchy
             app = GATTApplication()
+            service = GATTService(0, SERVICE_UUID, True)
+
+            # Create Characteristic
+            char = GATTCharacteristic(
+                0,
+                CHARACTERISTIC_UUID,
+                ['read', 'write', 'notify'],
+                service.path,
+                self.command_handler
+            )
+
+            # Create Descriptor (CCCD)
+            descriptor = CCCDescriptor(char.path)
+
+            # 4. Link Everything Together
+            service.add_characteristic(char)
+            # IMPORTANT: Your GATTService needs an add_characteristic method that
+            # might also need to track descriptors if you don't have a separate list
             app.add_service(service)
 
-            # 5. Export all to the bus
-            self.bus.export(app.path, app)
+            # 5. EXPORT ALL OBJECTS (Crucial Order)
+            # You must export the children BEFORE the application root
             self.bus.export(service.path, service)
             self.bus.export(char.path, char)
+            self.bus.export(descriptor.path, descriptor)
+            self.bus.export(app.path, app)
 
-            # 6. Register with BlueZ GattManager1
+            # 6. Register with BlueZ
             gatt_manager = bluez.get_interface('org.bluez.GattManager1')
+
+            # BlueZ will now crawl the paths provided in app.GetManagedObjects()
+            # Since we exported them above, it will find them successfully.
             await gatt_manager.call_register_application(app.path, {})
 
             logger.info(
-                "BLE server started successfully - GATT application registered")
+                "✅ BLE server started successfully - GATT application registered")
             logger.info(f"Service Path: {service.path}")
             logger.info(f"Characteristic Path: {char.path}")
-            logger.info("Advertising as 'UDS-CAN-Bridge'")
 
-            # Keep running
             await asyncio.Event().wait()
 
         except Exception as e:
