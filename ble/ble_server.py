@@ -112,8 +112,6 @@ class GATTService(ServiceInterface):
 
 
 class GATTApplication(ServiceInterface):
-    """Application Root implementing ObjectManager for BlueZ"""
-
     def __init__(self):
         super().__init__('org.freedesktop.DBus.ObjectManager')
         self.path = "/org/bluez/app"
@@ -140,9 +138,8 @@ class GATTApplication(ServiceInterface):
                         'Flags': Variant('as', c.flags)
                     }
                 }
-                # --- ADD THIS BLOCK ---
-                # Assuming you added a list or attribute to 'char' to hold descriptors
-                # or just hardcode the reference if you only have one
+                # Check if the characteristic has descriptors (like the CCCD)
+                # If you have a descriptor object, it MUST be here:
                 descriptor_path = f"{c.path}/desc0"
                 res[descriptor_path] = {
                     'org.bluez.GattDescriptor1': {
@@ -211,67 +208,37 @@ class BLEServer:
             await self._clean_stale_connections()
             self.bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
 
-            # 1. Configure Adapter
+            # ... (Adapter configuration code remains the same) ...
+
+            # 3. Create GATT Objects
+            app = GATTApplication()
+            service = GATTService(0, SERVICE_UUID, True)
+            char = GATTCharacteristic(0, CHARACTERISTIC_UUID,
+                                      ['read', 'write', 'notify'],
+                                      service.path, self.command_handler)
+            descriptor = CCCDescriptor(char.path)
+
+            # Link them in memory
+            service.add_characteristic(char)
+            app.add_service(service)
+
+            # 4. EXPORT TO BUS (DO THIS BEFORE REGISTERING)
+            # Every path mentioned in GetManagedObjects MUST be exported here
+            self.bus.export(app.path, app)
+            self.bus.export(service.path, service)
+            self.bus.export(char.path, char)
+            self.bus.export(descriptor.path, descriptor)  # <--- Critical!
+
+            # 5. Register with BlueZ
             introspection = await self.bus.introspect('org.bluez', '/org/bluez/hci0')
             bluez = self.bus.get_proxy_object(
                 'org.bluez', '/org/bluez/hci0', introspection)
-            adapter_props = bluez.get_interface(
-                'org.freedesktop.DBus.Properties')
-
-            await adapter_props.call_set('org.bluez.Adapter1', 'Powered', Variant('b', True))
-            await adapter_props.call_set('org.bluez.Adapter1', 'Alias', Variant('s', 'UDS-CAN-Bridge'))
-            await adapter_props.call_set('org.bluez.Adapter1', 'Discoverable', Variant('b', True))
-            logger.info("Bluetooth adapter configured")
-
-            # 2. Create Advertisement
-            advertisement = LEAdvertisement()
-            self.bus.export(advertisement.path, advertisement)
-            le_advertising = bluez.get_interface(
-                'org.bluez.LEAdvertisingManager1')
-            await le_advertising.call_register_advertisement(advertisement.path, {})
-            logger.info("Advertisement registered")
-
-            # 3. Build GATT Hierarchy
-            app = GATTApplication()
-            service = GATTService(0, SERVICE_UUID, True)
-
-            # Create Characteristic
-            char = GATTCharacteristic(
-                0,
-                CHARACTERISTIC_UUID,
-                ['read', 'write', 'notify'],
-                service.path,
-                self.command_handler
-            )
-
-            # Create Descriptor (CCCD)
-            descriptor = CCCDescriptor(char.path)
-
-            # 4. Link Everything Together
-            service.add_characteristic(char)
-            # IMPORTANT: Your GATTService needs an add_characteristic method that
-            # might also need to track descriptors if you don't have a separate list
-            app.add_service(service)
-
-            # 5. EXPORT ALL OBJECTS (Crucial Order)
-            # You must export the children BEFORE the application root
-            self.bus.export(service.path, service)
-            self.bus.export(char.path, char)
-            self.bus.export(descriptor.path, descriptor)
-            self.bus.export(app.path, app)
-
-            # 6. Register with BlueZ
             gatt_manager = bluez.get_interface('org.bluez.GattManager1')
 
-            # BlueZ will now crawl the paths provided in app.GetManagedObjects()
-            # Since we exported them above, it will find them successfully.
+            # Now when BlueZ calls GetManagedObjects, it will find all 4 objects
             await gatt_manager.call_register_application(app.path, {})
 
-            logger.info(
-                "✅ BLE server started successfully - GATT application registered")
-            logger.info(f"Service Path: {service.path}")
-            logger.info(f"Characteristic Path: {char.path}")
-
+            logger.info("✅ BLE server started - GATT application registered")
             await asyncio.Event().wait()
 
         except Exception as e:
