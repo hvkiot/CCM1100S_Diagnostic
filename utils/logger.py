@@ -1,33 +1,38 @@
-"""Logging Utility"""
-
 import logging
-from datetime import datetime
-import os
+import structlog
+from structlog.processors import JSONRenderer, TimeStamper
+import sys
 
 
-def setup_logger(name: str, log_file: str = None) -> logging.Logger:
-    """Setup logger with file and console handlers"""
+def setup_logger(level="INFO"):
+    """Configure structured logging"""
 
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
+    # Configure structlog
+    structlog.configure(
+        processors=[
+            structlog.stdlib.filter_by_level,
+            structlog.stdlib.add_logger_name,
+            structlog.stdlib.add_log_level,
+            structlog.stdlib.PositionalArgumentsFormatter(),
+            TimeStamper(fmt="iso"),
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            structlog.processors.UnicodeDecoder(),
+            JSONRenderer()
+        ],
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
 
-    # Console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    console_format = logging.Formatter(
-        '%(asctime)s - %(levelname)s - %(message)s')
-    console_handler.setFormatter(console_format)
-    logger.addHandler(console_handler)
+    # Configure root logger
+    logging.basicConfig(
+        format="%(message)s",
+        level=getattr(logging, level.upper()),
+        stream=sys.stdout
+    )
 
-    # File handler
-    if log_file:
-        os.makedirs('logs', exist_ok=True)
-        file_handler = logging.FileHandler(
-            f'logs/{log_file}_{datetime.now():%Y%m%d}.log')
-        file_handler.setLevel(logging.DEBUG)
-        file_format = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        file_handler.setFormatter(file_format)
-        logger.addHandler(file_handler)
 
-    return logger
+def get_logger(name):
+    """Get structured logger"""
+    return structlog.get_logger(name)

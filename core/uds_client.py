@@ -1,123 +1,126 @@
-"""UDS (Unified Diagnostic Services) Client"""
+from typing import Optional, Dict, Any
+from enum import Enum
+from core.can_bus import CANBusManager
+from core.iso_tp import ISOTPHandler
+from core.security_manager import SecurityManager
+from config.settings import CANConfig
+from utils.logger import get_logger
 
-import time
-from typing import Tuple
-from core.can_interface import CANInterface
-from config.can_config import UDS_IDS, TIMEOUTS, UDS_COMMANDS
-from core.decoder import decode_uds_response
+logger = get_logger(__name__)
 
-
+class UDSSessionType(Enum):
+    DEFAULT = 0x01
+    PROGRAMMING = 0x02
+    EXTENDED = 0x03
+    
 class UDSClient:
-    """UDS Protocol client for CCM1100S"""
+    """UDS (ISO 14229) client implementation"""
     
-    def __init__(self):
-        self.can = CANInterface()
+    def __init__(self, can_config: CANConfig, security_manager: SecurityManager):
+        self.can_manager = CANBusManager(can_config)
+        self.security_manager = security_manager
+        self.iso_tp = None
+        self._is_authenticated = False
+        self._current_session = UDSSessionType.DEFAULT
     
-    def _send_flow_control(self):
-        """Send flow control frame for multi-frame responses"""
-        flow_control = can.Message(
-            arbitration_id=UDS_IDS['request'],
-            data=[0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-            is_extended_id=True
+    def connect(self) -> bool:
+        """Establish connection to ECU"""
+        if not self.can_manager.connect():
+            return False
+        
+        self.iso_tp = ISOTPHandler(
+            can_sender=self._send_can_frame,
+            can_receiver=self._receive_can_frame
         )
-        self.can.send_message(
-            arbitration_id=UDS_IDS['request'],
-            data=[0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+        
+        # Try to switch to extended session if needed
+        return self._diagnostic_session_control(UDSSessionType.EXTENDED)
+    
+    def disconnect(self):
+        """Disconnect from ECU"""
+        self.can_manager.disconnect()
+        self._is_authenticated = False
+    
+    def _send_can_frame(self, data: bytes):
+        """Send CAN frame via CAN manager"""
+        self.can_manager.send_message(
+            self.can_manager.config.tx_id,
+            data
         )
     
-    def query_single_frame(self, did: int, timeout: float = TIMEOUTS['query']) -> Tuple[bool, str, str]:
-        """Query single-frame UDS DID"""
-        try:
-            # Start diagnostic session
-            self.can.start_diagnostic_session()
-            time.sleep(TIMEOUTS['session_hold'])
-            
-            # Send request
-            d_h, d_l = (did >> 8) & 0xFF, did & 0xFF
-            self.can.send_message(
-                arbitration_id=UDS_IDS['request'],
-                data=[0x03, UDS_COMMANDS['read_data'], d_h, d_l, 0x00, 0x00, 0x00, 0x00]
-            )
-            
-            # Wait for response
-            start = time.time()
-            while time.time() - start < timeout:
-                msg = self.can.receive_message(0.1)
-                
-                if msg and msg.arbitration_id == UDS_IDS['response']:
-                    data = msg.data
-                    
-                    # Check for negative response
-                    if data[0] == UDS_COMMANDS['negative_response']:
-                        return False, f"Negative response: 0x{data[2]:02X}", data.hex()
-                    
-                    frame_type = data[0] >> 4
-                    if frame_type == 0x0:  # Single frame
-                        length = data[0] & 0x0F
-                        response_data = data[1:1+length]
-                        decoded = decode_uds_response(response_data, did)
-                        return True, decoded, data.hex()
-            
-            return False, "Timeout", ""
-            
-        except Exception as e:
-            return False, f"Error: {e}", ""
+    def _receive_can_frame(self, timeout: float = 1.0):
+        """Receive CAN frame via CAN manager"""
+        msg = self.can_manager.receive_message(timeout)
+        return msg.data if msg else None
     
-    def query_multi_frame(self, did: int, timeout: float = TIMEOUTS['query']) -> Tuple[bool, str, str]:
-        """Query multi-frame UDS DID"""
-        try:
-            self.can.start_diagnostic_session()
-            time.sleep(TIMEOUTS['session_hold'])
-            
-            # Send request
-            d_h, d_l = (did >> 8) & 0xFF, did & 0xFF
-            self.can.send_message(
-                arbitration_id=UDS_IDS['request'],
-                data=[0x03, UDS_COMMANDS['read_data'], d_h, d_l, 0x00, 0x00, 0x00, 0x00]
-            )
-            
-            # Wait for first frame
-            start = time.time()
-            first_frame = None
-            
-            while time.time() - start < timeout:
-                msg = self.can.receive_message(0.1)
-                if msg and msg.arbitration_id == UDS_IDS['response']:
-                    data = msg.data
-                    if (data[0] >> 4) == 0x1:  # First frame
-                        first_frame = data
-                        break
-            
-            if not first_frame:
-                return False, "No first frame received", ""
-            
-            # Send flow control
-            self._send_flow_control()
-            
-            # Parse first frame
-            total_length = ((first_frame[0] & 0x0F) << 8) | first_frame[1]
-            received_data = bytearray(first_frame[2:8])
-            
-            # Receive consecutive frames
-            expected_seq = 1
-            start = time.time()
-            
-            while len(received_data) < total_length and time.time() - start < timeout:
-                msg = self.can.receive_message(0.1)
-                if msg and msg.arbitration_id == UDS_IDS['response']:
-                    data = msg.data
-                    if (data[0] >> 4) == 0x2:  # Consecutive frame
-                        seq = data[0] & 0x0F
-                        if seq == expected_seq:
-                            received_data.extend(data[1:8])
-                            expected_seq = (expected_seq + 1) % 16
-            
-            if len(received_data) >= total_length:
-                complete_data = bytes(received_data[:total_length])
-                decoded = decode_uds_response(complete_data, did)
-                return True, decoded, complete_data.hex()
-            
-            return False, f"Incomplete: {len(received_data)}/{total_length}", ""
-            
-        except Exception as e:
-            return False, f"Error: {e}", ""
+    def _diagnostic_session_control(self, session_type: UDSSessionType) -> bool:
+        """Switch diagnostic session"""
+        response = self.raw_request(bytes([0x10, session_type.value]))
+        if response and response[0] == 0x50:
+            self._current_session = session_type
+            logger.info(f"Switched to {session_type.name} session")
+            return True
+        return False
+    
+    def raw_request(self, payload: bytes, timeout: float = 1.0) -> Optional[bytes]:
+        """Send raw UDS request"""
+        return self.iso_tp.send(payload, timeout)
+    
+    def read_data_by_identifier(self, did: int) -> Optional[bytes]:
+        """Read Data By Identifier (0x22) service"""
+        payload = bytes([0x22, (did >> 8) & 0xFF, did & 0xFF])
+        response = self.iso_tp.send(payload)
+        
+        if response and response[0] == 0x62:
+            logger.info(f"Read DID 0x{did:04X} success")
+            return response[1:]
+        elif response and response[0] == 0x7F:
+            nrc = response[2]
+            logger.error(f"Read DID failed: NRC 0x{nrc:02X}")
+            return None
+        
+        return None
+    
+    def write_data_by_identifier(self, did: int, data: bytes) -> bool:
+        """Write Data By Identifier (0x2E) service"""
+        if not self._is_authenticated and did != 0xF190:  # VIN might not need auth
+            logger.warning("Security access required for write operation")
+            if not self.security_manager.do_security_access(self):
+                return False
+            self._is_authenticated = True
+        
+        payload = bytes([0x2E, (did >> 8) & 0xFF, did & 0xFF]) + data
+        response = self.iso_tp.send(payload)
+        
+        if response and response[0] == 0x6E:
+            logger.info(f"Write DID 0x{did:04X} success")
+            return True
+        elif response and response[0] == 0x7F:
+            nrc = response[2]
+            logger.error(f"Write DID failed: NRC 0x{nrc:02X}")
+            return False
+        
+        return False
+    
+    def read_vin(self) -> Optional[str]:
+        """Read VIN from DID 0xF190"""
+        response = self.read_data_by_identifier(0xF190)
+        if response:
+            try:
+                return response.decode('ascii').strip('\x00')
+            except:
+                return None
+        return None
+    
+    def write_vin(self, vin: str) -> bool:
+        """Write VIN to DID 0xF190"""
+        if len(vin) != 17:
+            logger.error(f"VIN must be 17 chars, got {len(vin)}")
+            return False
+        
+        return self.write_data_by_identifier(0xF190, vin.encode('ascii'))
+    
+    def routine_control(self, routine_id: int, subfunction: int, data: bytes = b'') -> Optional[bytes]:
+        """Routine Control (0x31) service"""
+        payload = bytes([0x31, subfunction, (routine_id >> 8) & 0xFF, routine_id & 0xFF]) + data
+        return self.iso_tp.send(payload)

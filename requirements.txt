@@ -1,6 +1,6 @@
-python-can>=4.0.0
-streamlit>=1.28.0
-pandas>=1.5.0
-plotly>=5.14.0
-python-dotenv>=1.0.0
-numpy>=1.23.0
+python-can==4.2.0
+bleak==0.21.1
+pycryptodome==3.19.0
+pydantic==2.5.0
+asyncio==3.4.3
+structlog==24.1.0

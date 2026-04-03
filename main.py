@@ -1,75 +1,96 @@
-"""Main Entry Point for CCM1100S Diagnostic Tool"""
-
+#!/usr/bin/env python3
+import asyncio
+import signal
 import sys
-import argparse
-from ui.streamlit_app import main
+from config.settings import CANConfig, BLEConfig, SecurityConfig
+from core.uds_client import UDSClient
+from core.security_manager import SecurityManager
+from ble.command_handler import CommandHandler
+from ble.ble_server import UDSBLEServer
+from utils.logger import setup_logger, get_logger
+
+logger = get_logger(__name__)
 
 
-def parse_arguments():
-    """Parse command line arguments"""
-    parser = argparse.ArgumentParser(description='CCM1100S Diagnostic Tool')
-    parser.add_argument('--mode', choices=['ui', 'cli'], default='ui',
-                       help='Run mode: UI (Streamlit) or CLI')
-    parser.add_argument('--test', action='store_true',
-                       help='Run connection test')
-    return parser.parse_args()
+class UDSBLEBridge:
+    """Main application class for UDS-CAN-BLE bridge"""
+
+    def __init__(self):
+        self.can_config = CANConfig()
+        self.ble_config = BLEConfig()
+        self.security_config = SecurityConfig()
+
+        self.security_manager = SecurityManager(self.security_config)
+        self.uds_client = UDSClient(self.can_config, self.security_manager)
+        self.command_handler = CommandHandler(self.uds_client)
+        self.ble_server = UDSBLEServer(self.ble_config, self.command_handler)
+
+        self._running = False
+
+    async def initialize(self) -> bool:
+        """Initialize all components"""
+        logger.info("Initializing UDS-BLE Bridge...")
+
+        # Connect to ECU
+        if not self.uds_client.connect():
+            logger.error("Failed to connect to ECU via CAN")
+            return False
+
+        logger.info("ECU connected successfully")
+
+        # Start BLE server
+        asyncio.create_task(self.ble_server.start())
+
+        self._running = True
+        return True
+
+    async def shutdown(self):
+        """Graceful shutdown"""
+        logger.info("Shutting down...")
+        self._running = False
+
+        self.uds_client.disconnect()
+
+        # Stop BLE server
+        if self.ble_server.server:
+            await self.ble_server.server.stop()
+
+        logger.info("Shutdown complete")
+
+    async def run(self):
+        """Main run loop"""
+        try:
+            if await self.initialize():
+                logger.info("Bridge is running. Press Ctrl+C to stop.")
+
+                # Keep running until interrupted
+                while self._running:
+                    await asyncio.sleep(1)
+            else:
+                logger.error("Failed to initialize bridge")
+
+        except KeyboardInterrupt:
+            logger.info("Received interrupt signal")
+        finally:
+            await self.shutdown()
 
 
-def run_cli():
-    """Run CLI mode"""
-    print("="*60)
-    print("CCM1100S Diagnostic Tool - CLI Mode")
-    print("="*60)
-    
-    from core.uds_client import UDSClient
-    
-    client = UDSClient()
-    
-    print("\nTesting connection...")
-    success, result, _ = client.query_single_frame(0x220F)
-    
-    if success:
-        print(f"✅ Connected - System Voltage: {result}")
-    else:
-        print(f"❌ Connection failed: {result}")
-        return
-    
-    print("\nAvailable commands:")
-    print("  voltage  - Read system voltage")
-    print("  firmware - Read firmware version")
-    print("  vin      - Read VIN number")
-    print("  exit     - Exit")
-    
-    while True:
-        cmd = input("\n> ").strip().lower()
-        
-        if cmd == 'exit':
-            break
-        elif cmd == 'voltage':
-            success, result, _ = client.query_single_frame(0x220F)
-            print(f"System Voltage: {result}")
-        elif cmd == 'firmware':
-            success, result, _ = client.query_multi_frame(0x220D)
-            print(f"Firmware Version: {result}")
-        elif cmd == 'vin':
-            success, result, _ = client.query_multi_frame(0xF190)
-            print(f"VIN: {result}")
-        else:
-            print("Unknown command")
+def main():
+    """Entry point"""
+    # Setup logging
+    setup_logger(level="INFO")
+
+    # Create and run bridge
+    bridge = UDSBLEBridge()
+
+    try:
+        asyncio.run(bridge.run())
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        logger.exception(f"Fatal error: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    args = parse_arguments()
-    
-    if args.test:
-        from core.uds_client import UDSClient
-        client = UDSClient()
-        success, result, _ = client.query_single_frame(0x220F)
-        if success:
-            print(f"✅ Connection successful - {result}")
-        else:
-            print(f"❌ Connection failed - {result}")
-    elif args.mode == 'cli':
-        run_cli()
-    else:
-        main()
+    main()
