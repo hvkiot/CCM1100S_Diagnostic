@@ -68,21 +68,22 @@ class GATTCharacteristic(ServiceInterface):
         """Process command and send notification"""
         try:
             logger.info(f"Processing command: {message.get('command')}")
-            # Wait for your UDS logic to finish
+
+            # 1. Wait for the ACTUAL ECU response
             response = await self.command_handler.handle_command(message)
+            logger.info(f"Got ECU response: {response}")
 
             if self.notifying:
-                # 1. Convert dict to JSON string, then to bytes, then to a list
+                # 2. CLEARLY define the data to be sent
+                # Ensure we are NOT sending the 'message' variable by mistake
                 response_json = json.dumps(response)
                 response_bytes = list(response_json.encode('utf-8'))
 
-                # 2. TRIGGER THE SIGNAL (This sends it to Flutter)
+                # 3. Emit the signal
                 self.Notify(response_bytes)
-
-                logger.info(f"✅ Notification sent: {response_json}")
+                logger.info(f"✅ REAL Notification sent: {response_json}")
             else:
-                logger.warning(
-                    "⚠️ Logic finished but 'notifying' is False. Is the app listening?")
+                logger.warning("Notifying is False, cannot send response.")
 
         except Exception as e:
             logger.error(f"Command processing error: {e}")
@@ -168,11 +169,23 @@ class CCCDescriptor(ServiceInterface):
 
     @method()
     def WriteValue(self, value: 'ay', options: 'a{sv}'):
-        self.value = bytearray(value)
-        # Update notifying flag on characteristic
-        characteristic_path = self.path.rsplit('/desc0', 1)[0]
-        # You'll need to access the characteristic to set notifying
-        logger.info(f"CCCD write: {value.hex()}")
+        """Handle write requests from the Flutter App"""
+        try:
+            # 1. Convert the incoming bytes (ay) from Flutter to a string
+            data = bytes(value)
+            decoded_str = data.decode('utf-8')
+
+            # 2. Parse the JSON command
+            message = json.loads(decoded_str)
+            logger.info(f"📥 Received from App: {message.get('command')}")
+
+            # 3. CRITICAL: Start the processing task!
+            # We use asyncio.create_task so the BLE write returns 'Success' immediately,
+            # while the ECU work happens in the background.
+            asyncio.create_task(self._process_command(message))
+
+        except Exception as e:
+            logger.error(f"❌ WriteValue Error: {e}")
 
 
 class BLEServer:
