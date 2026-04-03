@@ -6,7 +6,7 @@ from config.settings import CANConfig, SecurityConfig
 from core.uds_client import UDSClient
 from core.security_manager import SecurityManager
 from ble.command_handler import CommandHandler
-from ble.ble_server_dbus import BLEServer
+from ble.ble_server import BLEServer
 from utils.logger import setup_logger, get_logger
 
 logger = get_logger(__name__)
