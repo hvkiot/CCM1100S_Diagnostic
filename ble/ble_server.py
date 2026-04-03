@@ -99,12 +99,22 @@ class GATTCharacteristic(ServiceInterface):
     async def _process_command(self, message):
         """Process command and send notification"""
         try:
+            logger.info(f"Processing command: {message.get('command')}")
             response = await self.command_handler.handle_command(message)
+            logger.info(f"Got response: {response}")
+
             if self.notifying:
                 response_bytes = json.dumps(response).encode('utf-8')
+                logger.info(
+                    f"Sending notification: {len(response_bytes)} bytes")
+                logger.info(f"Response content: {response_bytes[:100]}")
                 self.Notify(list(response_bytes))
+                logger.info("Notification sent successfully")
+            else:
+                logger.warning("Cannot send response: notifying is False")
+
         except Exception as e:
-            logger.error(f"Command processing error: {e}")
+            logger.error(f"Command processing error: {e}", exc_info=True)
 
 
 class GATTService(ServiceInterface):
@@ -161,6 +171,39 @@ class GATTApplication(ServiceInterface):
         return res
 
 
+class CCCDescriptor(ServiceInterface):
+    """Client Characteristic Configuration Descriptor"""
+
+    def __init__(self, characteristic_path):
+        super().__init__('org.bluez.GattDescriptor1')
+        self.path = f"{characteristic_path}/desc0"
+        self.value = bytearray([0x00, 0x00])  # Initial: notifications disabled
+
+    @dbus_property(access=PropertyAccess.READ)
+    def UUID(self) -> 's':
+        return '00002902-0000-1000-8000-00805f9b34fb'
+
+    @dbus_property(access=PropertyAccess.READ)
+    def Characteristic(self) -> 'o':
+        return self.path.rsplit('/desc0', 1)[0]
+
+    @dbus_property(access=PropertyAccess.READ)
+    def Flags(self) -> 'as':
+        return ['read', 'write']
+
+    @method()
+    def ReadValue(self, options: 'a{sv}') -> 'ay':
+        return list(self.value)
+
+    @method()
+    def WriteValue(self, value: 'ay', options: 'a{sv}'):
+        self.value = bytearray(value)
+        # Update notifying flag on characteristic
+        characteristic_path = self.path.rsplit('/desc0', 1)[0]
+        # You'll need to access the characteristic to set notifying
+        logger.info(f"CCCD write: {value.hex()}")
+
+
 class BLEServer:
     """BLE Server using dbus-next with ObjectManager"""
 
@@ -200,7 +243,8 @@ class BLEServer:
             char = GATTCharacteristic(0, CHARACTERISTIC_UUID,
                                       ['read', 'write', 'notify'],
                                       service.path, self.command_handler)
-            service.add_characteristic(char)
+            descriptor = CCCDescriptor(char.path)
+            service.add_characteristic(descriptor)
 
             # 4. Create Application Root with ObjectManager
             app = GATTApplication()
