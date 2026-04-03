@@ -164,7 +164,8 @@ class BLEServer:
             self.bus.export(char.path, char)
 
             # 4. Register with BlueZ GattManager1
-            bluez = await self.bus.get_proxy_object('org.bluez', '/org/bluez/hci0', None)
+            introspection = await self.bus.introspect('org.bluez', '/org/bluez/hci0')
+            bluez = self.bus.get_proxy_object('org.bluez', '/org/bluez/hci0', introspection)
             gatt_manager = bluez.get_interface('org.bluez.GattManager1')
 
             await gatt_manager.call_register_application(app.path, {})
