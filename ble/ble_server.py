@@ -16,10 +16,23 @@ CHARACTERISTIC_UUID = "87654321-4321-4321-4321-CBA987654321"
 class UDSCharacteristic(ServiceInterface):
     """BLE Characteristic for UDS commands"""
 
-    def __init__(self, command_handler):
-        super().__init__(CHARACTERISTIC_UUID)
+    def __init__(self, command_handler, service_path):
+        super().__init__('org.bluez.GattCharacteristic1')
         self.command_handler = command_handler
+        self.service_path = service_path
         self.notifying = False
+
+    @dbus_property(access=PropertyAccess.READ)
+    def UUID(self) -> 's':
+        return CHARACTERISTIC_UUID
+
+    @dbus_property(access=PropertyAccess.READ)
+    def Service(self) -> 'o':
+        return self.service_path
+
+    @dbus_property(access=PropertyAccess.READ)
+    def Flags(self) -> 'as':
+        return ['read', 'write', 'notify']
 
     @method()
     def ReadValue(self, options: 'a{sv}') -> 'ay':
@@ -74,10 +87,18 @@ class UDSCharacteristic(ServiceInterface):
 class UDSService(ServiceInterface):
     """Main UDS Service"""
 
-    def __init__(self, command_handler):
-        super().__init__(SERVICE_UUID)
-        self.characteristic = UDSCharacteristic(command_handler)
-        self.add_characteristic(self.characteristic)
+    def __init__(self, command_handler, service_path):
+        super().__init__('org.bluez.GattService1')
+        self.service_path = service_path
+        self.characteristic = UDSCharacteristic(command_handler, service_path)
+
+    @dbus_property(access=PropertyAccess.READ)
+    def UUID(self) -> 's':
+        return SERVICE_UUID
+
+    @dbus_property(access=PropertyAccess.READ)
+    def Primary(self) -> 'b':
+        return True
 
     @dbus_property(access=PropertyAccess.READ)
     def DeviceName(self) -> 's':
@@ -97,18 +118,22 @@ class BLEServer:
             # Connect to system bus
             self.bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
 
-            # Get BlueZ service
-            bluez = await self.bus.get_proxy_object(
+            # Fix: introspection should be None for auto-discovery
+            await self.bus.get_proxy_object(
                 'org.bluez',
                 '/org/bluez/hci0',
-                'org.freedesktop.DBus.Introspectable'
+                None
             )
 
-            # Create and register our service
-            service = UDSService(self.command_handler)
+            # Create and register our service at a valid BlueZ path
+            service_path = '/org/bluez/hci0/service0'
+            char_path = f'{service_path}/char0'
+            
+            service = UDSService(self.command_handler, service_path)
 
-            # Export the service
-            await self.bus.export('/org/bluez/hci0/service0', service)
+            # Export the components
+            await self.bus.export(service_path, service)
+            await self.bus.export(char_path, service.characteristic)
 
             logger.info("BLE server started successfully")
             logger.info(f"Service UUID: {SERVICE_UUID}")
