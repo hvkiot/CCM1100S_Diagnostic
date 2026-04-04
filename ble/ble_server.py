@@ -45,16 +45,42 @@ class Characteristic(ServiceInterface):
     async def WriteValue(self, value: 'ay', options: 'a{sv}'):
         """Handle write from Flutter app"""
         try:
-            # value comes as bytes already
             data = bytes(value)
-            decoded = data.decode('utf-8')
-            message = json.loads(decoded)
+            message = json.loads(data.decode('utf-8'))
             logger.info(f"📥 Received: {message.get('command')}")
 
-            asyncio.create_task(self._process_command_background(message))
+            # Return immediately to BlueZ - don't block
+            # Start background task to handle ECU communication
+            asyncio.create_task(self._execute_and_notify(message))
 
         except Exception as e:
             logger.error(f"Write error: {e}")
+
+    async def _execute_and_notify(self, message):
+        """Background task - talk to ECU, then notify phone"""
+        try:
+            # Small delay to ensure Android clears its write cache
+            await asyncio.sleep(0.15)
+
+            # Talk to ECU
+            response = await self.command_handler.handle_command(message)
+
+            # Another small delay before sending notification
+            await asyncio.sleep(0.05)
+
+            if self.notifying:
+                response_json = json.dumps(response)
+                # Convert to list of ints for dbus
+                response_bytes = [b for b in response_json.encode('utf-8')]
+
+                # Emit the signal
+                self.Notify(response_bytes)
+                logger.info(f"✅ ECU Response sent: {response_json}")
+            else:
+                logger.warning("Notifications disabled - response not sent")
+
+        except Exception as e:
+            logger.error(f"Background error: {e}")
 
     @method()
     async def StartNotify(self):
@@ -69,48 +95,6 @@ class Characteristic(ServiceInterface):
     @signal()
     def Notify(self, value: 'ay') -> 'ay':
         return value
-
-    async def _send_response(self, message):
-        """Process command and send response via notification"""
-        try:
-            response = await self.command_handler.handle_command(message)
-            logger.info(f"Response: {response}")
-
-            if self.notifying:
-                response_json = json.dumps(response)
-                # Convert to bytes, NOT list
-                response_bytes = response_json.encode('utf-8')
-                self.Notify(response_bytes)
-                logger.info("✅ Notification sent")
-            else:
-                logger.warning("Notifications disabled")
-
-        except Exception as e:
-            logger.error(f"Response error: {e}")
-
-    async def _process_command_background(self, message):
-        """Background worker to talk to ECU and then notify phone"""
-        try:
-            # Add a small delay to ensure the write completes
-            await asyncio.sleep(0.1)
-
-            # Talk to the ECU
-            response = await self.command_handler.handle_command(message)
-
-            # Only notify once the ECU actually responds
-            if self.notifying:
-                response_json = json.dumps(response)
-                response_bytes = response_json.encode('utf-8')
-
-                # Add another small delay before sending
-                await asyncio.sleep(0.1)
-
-                # Emit the signal
-                self.Notify(response_bytes)
-                logger.info(f"✅ ECU Response pushed to App: {response_json}")
-
-        except Exception as e:
-            logger.error(f"❌ Background Process error: {e}")
 
 
 class Service(ServiceInterface):
