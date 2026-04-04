@@ -1,3 +1,4 @@
+# /core/can_bus.py
 import can
 from typing import Optional
 from config.settings import CANConfig
@@ -58,13 +59,14 @@ class CANBusManager:
 
     def receive_message(self, timeout: float = 1.0) -> Optional[can.Message]:
         """Receive CAN message with timeout"""
-        if not self._is_connected:
+        if not self._is_connected or not self.bus:
             return None
 
-        start = time.time()
-        while time.time() - start < timeout:
-            msg = self.bus.recv(0.01)
+        try:
+            msg = self.bus.recv(timeout)
             if msg and msg.arbitration_id == self.config.rx_id:
                 logger.debug(f"RX: {hex(msg.arbitration_id)} {msg.data.hex()}")
                 return msg
+        except Exception as e:
+            logger.debug(f"Receive timeout: {e}")
         return None

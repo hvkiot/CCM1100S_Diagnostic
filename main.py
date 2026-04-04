@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# /main.py
 import asyncio
 import signal
 import sys

@@ -1,3 +1,4 @@
+# /core/security_manager.py
 from Crypto.Cipher import AES
 from typing import Optional
 from config.settings import SecurityConfig
