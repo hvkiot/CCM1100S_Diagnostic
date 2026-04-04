@@ -119,8 +119,8 @@ class UDSClient:
         return False
 
     def read_vin(self) -> Optional[str]:
-        """Read VIN from DID 0xF190"""
-        response = self.read_data_by_identifier(0xF190)
+        """Read VIN from DID 0x220F"""
+        response = self.read_data_by_identifier(0x220F)
         if response:
             try:
                 return response.decode('ascii').strip('\x00')
