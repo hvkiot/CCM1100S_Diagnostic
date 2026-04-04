@@ -1,7 +1,6 @@
 import asyncio
 import signal
 import sys
-import time
 from config.settings import CANConfig, SecurityConfig
 from core.uds_client import UDSClient
 from core.security_manager import SecurityManager
@@ -21,7 +20,6 @@ class UDSBLEBridge:
         self.command_handler = None
         self.ble_server = None
         self._running = False
-        self._health_check_task = None
 
     async def initialize(self) -> bool:
         logger.info("Initializing UDS-BLE Bridge...")
@@ -47,45 +45,11 @@ class UDSBLEBridge:
         logger.info("Shutting down...")
         self._running = False
 
-        if self._health_check_task:
-            self._health_check_task.cancel()
-            try:
-                await self._health_check_task
-            except:
-                pass
-
         if self.ble_server:
             await self.ble_server.stop()
         if self.uds_client:
             self.uds_client.disconnect()
         logger.info("Shutdown complete")
-
-    async def health_check(self):
-        """Background task to monitor ECU health"""
-        while self._running:
-            await asyncio.sleep(10)  # Check every 10 seconds
-
-            if not self._running:
-                break
-
-            if self.uds_client and self.uds_client.can_manager._is_connected:
-                try:
-                    # Simple check - just see if we can send a tester present
-                    # Don't wait too long
-                    response = await asyncio.wait_for(
-                        asyncio.get_event_loop().run_in_executor(
-                            None, self.uds_client.raw_request, bytes(
-                                [0x3E, 0x00]), 0.3
-                        ),
-                        timeout=0.5
-                    )
-                    if response is None:
-                        logger.warning(
-                            "ECU not responding, will reconnect on next cycle")
-                except asyncio.TimeoutError:
-                    logger.warning("Health check timeout")
-                except Exception as e:
-                    logger.debug(f"Health check exception: {e}")
 
     async def run_forever(self):
         """Main loop with auto-restart on failure"""
@@ -95,38 +59,15 @@ class UDSBLEBridge:
             try:
                 # Initialize connection
                 if await self.initialize():
-                    logger.info("Bridge running. Waiting for connections...")
+                    logger.info("Bridge running. Ready for BLE connections...")
 
-                    # Start health check in background
-                    self._health_check_task = asyncio.create_task(
-                        self.health_check())
+                    # Keep running - no health check
+                    while self._running:
+                        await asyncio.sleep(1)
 
-                    # Keep running until connection is lost
-                    connection_lost = False
-                    while self._running and not connection_lost:
-                        await asyncio.sleep(2)
-
-                        # Check if ECU is still connected
-                        if self.uds_client and self.uds_client.can_manager._is_connected:
-                            # Quick check without blocking
-                            pass
-                        else:
-                            connection_lost = True
-                            logger.warning("Connection lost")
-
-                    # Cancel health check
-                    if self._health_check_task:
-                        self._health_check_task.cancel()
-                        try:
-                            await self._health_check_task
-                        except:
-                            pass
-                        self._health_check_task = None
-
-                    # Clean up
-                    await self.shutdown()
-                    logger.info("Waiting 3 seconds before reconnect...")
-                    await asyncio.sleep(3)
+                        # Only check if connection is still alive when we have activity
+                        # Don't proactively ping the ECU
+                        pass
                 else:
                     logger.error(
                         "Initialization failed, retrying in 5 seconds...")
