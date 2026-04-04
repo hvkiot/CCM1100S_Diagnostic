@@ -1,4 +1,3 @@
-# /core/iso_tp.py
 import time
 import logging
 from typing import Optional
@@ -7,13 +6,11 @@ logger = logging.getLogger(__name__)
 
 
 class ISOTPHandler:
-    """ISO-TP (ISO 15765-2) protocol handler - matches working manual script"""
+    """ISO-TP (ISO 15765-2) protocol handler"""
 
-    def __init__(self, can_sender, can_receiver, tx_id=0x1BDA08F1, rx_id=0x1BDAF108):
+    def __init__(self, can_sender, can_receiver):
         self.send_frame = can_sender
         self.recv_frame = can_receiver
-        self.tx_id = tx_id
-        self.rx_id = rx_id
 
     def send(self, payload: bytes, timeout: float = 2.0) -> Optional[bytes]:
         """Send UDS request and receive response"""
@@ -28,16 +25,16 @@ class ISOTPHandler:
         return self._receive_response(timeout)
 
     def _receive_response(self, timeout: float = 2.0) -> Optional[bytes]:
-        """Receive and parse UDS response - handles both single and multi-frame"""
+        """Receive and parse UDS response"""
         start = time.time()
-        response = bytearray()
 
         while time.time() - start < timeout:
             msg = self.recv_frame(0.1)
-            if not msg:
+            if msg is None:
                 continue
 
-            data = msg.data
+            # msg is already bytes from can_bus
+            data = msg if isinstance(msg, bytes) else bytes(msg)
             logger.debug(f"RX: {data.hex()}")
 
             pci_type = (data[0] >> 4) & 0x0F
@@ -62,10 +59,11 @@ class ISOTPHandler:
                 cf_timeout = time.time() + 1.0
                 while len(response) < total_len and time.time() < cf_timeout:
                     cf_msg = self.recv_frame(0.5)
-                    if not cf_msg:
+                    if cf_msg is None:
                         continue
 
-                    cf_data = cf_msg.data
+                    cf_data = cf_msg if isinstance(
+                        cf_msg, bytes) else bytes(cf_msg)
                     cf_pci = (cf_data[0] >> 4) & 0x0F
 
                     if cf_pci == 2:  # Consecutive Frame
