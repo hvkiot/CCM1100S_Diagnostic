@@ -1,4 +1,3 @@
-# /ble/ble_server.py
 import asyncio
 import json
 from dbus_next.aio import MessageBus
@@ -6,17 +5,18 @@ from dbus_next.service import ServiceInterface, method, dbus_property, signal
 from dbus_next.constants import PropertyAccess, BusType
 from dbus_next import Variant
 from utils.logger import get_logger
+from config.settings import BLEConfig
 
 logger = get_logger(__name__)
 
-SERVICE_UUID = "12345678-1234-1234-1234-123456789ABC"
-CHARACTERISTIC_UUID = "87654321-4321-4321-4321-CBA987654321"
+SERVICE_UUID = BLEConfig.service_uuid
+CHARACTERISTIC_UUID = BLEConfig.characteristic_uuid
 
 
-class GATTCharacteristic(ServiceInterface):
-    def __init__(self, index, uuid, flags, service_path, command_handler):
+class Characteristic(ServiceInterface):
+    def __init__(self, uuid, flags, service_path, command_handler):
         super().__init__('org.bluez.GattCharacteristic1')
-        self.path = f"{service_path}/char{index}"
+        self.path = f"{service_path}/char0"
         self.uuid = uuid
         self.flags = flags
         self.service_path = service_path
@@ -37,7 +37,7 @@ class GATTCharacteristic(ServiceInterface):
 
     @method()
     def ReadValue(self, options: 'a{sv}') -> 'ay':
-        return []
+        return list(b'READY')
 
     @method()
     async def WriteValue(self, value: 'ay', options: 'a{sv}'):
@@ -48,8 +48,14 @@ class GATTCharacteristic(ServiceInterface):
             message = json.loads(decoded)
             logger.info(f"📥 Received: {message.get('command')}")
 
-            # Process command and send response
-            asyncio.create_task(self._send_response(message))
+            # Process command using your command handler
+            response = await self.command_handler.handle_command(message)
+
+            if self.notifying:
+                response_json = json.dumps(response)
+                response_bytes = list(response_json.encode('utf-8'))
+                self.Notify(response_bytes)
+                logger.info(f"✅ Response sent: {response_json}")
 
         except Exception as e:
             logger.error(f"Write error: {e}")
@@ -86,10 +92,10 @@ class GATTCharacteristic(ServiceInterface):
             logger.error(f"Response error: {e}")
 
 
-class GATTService(ServiceInterface):
-    def __init__(self, index, uuid, primary):
+class Service(ServiceInterface):
+    def __init__(self, uuid, primary):
         super().__init__('org.bluez.GattService1')
-        self.path = f"/org/bluez/app/service{index}"
+        self.path = "/org/bluez/app/service0"
         self.uuid = uuid
         self.primary = primary
         self.characteristics = []
@@ -102,11 +108,11 @@ class GATTService(ServiceInterface):
     def Primary(self) -> 'b':
         return self.primary
 
-    def add_characteristic(self, characteristic):
-        self.characteristics.append(characteristic)
+    def add_characteristic(self, char):
+        self.characteristics.append(char)
 
 
-class GATTApplication(ServiceInterface):
+class Application(ServiceInterface):
     def __init__(self):
         super().__init__('org.freedesktop.DBus.ObjectManager')
         self.path = "/org/bluez/app"
@@ -136,6 +142,28 @@ class GATTApplication(ServiceInterface):
         return response
 
 
+class Advertisement(ServiceInterface):
+    def __init__(self):
+        super().__init__('org.bluez.LEAdvertisement1')
+        self.path = "/org/bluez/app/advertisement0"
+
+    @dbus_property(access=PropertyAccess.READ)
+    def Type(self) -> 's':
+        return 'peripheral'
+
+    @dbus_property(access=PropertyAccess.READ)
+    def ServiceUUIDs(self) -> 'as':
+        return [SERVICE_UUID]
+
+    @dbus_property(access=PropertyAccess.READ)
+    def LocalName(self) -> 's':
+        return BLEConfig.device_name
+
+    @method()
+    def Release(self):
+        logger.info("Advertisement released")
+
+
 class BLEServer:
     def __init__(self, command_handler):
         self.command_handler = command_handler
@@ -143,21 +171,19 @@ class BLEServer:
 
     async def start(self):
         try:
-            # Clean stale connections
-            await self._clean_stale_connections()
-
             # Connect to system bus
             self.bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
 
             # Create application
-            app = GATTApplication()
-            service = GATTService(0, SERVICE_UUID, True)
-            characteristic = GATTCharacteristic(
-                0, CHARACTERISTIC_UUID,
+            app = Application()
+            service = Service(SERVICE_UUID, True)
+            characteristic = Characteristic(
+                CHARACTERISTIC_UUID,
                 ['read', 'write', 'notify'],
                 service.path,
                 self.command_handler
             )
+            advertisement = Advertisement()
 
             service.add_characteristic(characteristic)
             app.add_service(service)
@@ -166,15 +192,26 @@ class BLEServer:
             self.bus.export(app.path, app)
             self.bus.export(service.path, service)
             self.bus.export(characteristic.path, characteristic)
+            self.bus.export(advertisement.path, advertisement)
 
-            # Register with BlueZ
+            # Get BlueZ interfaces
             introspection = await self.bus.introspect('org.bluez', '/org/bluez/hci0')
             bluez = self.bus.get_proxy_object(
                 'org.bluez', '/org/bluez/hci0', introspection)
-            gatt_manager = bluez.get_interface('org.bluez.GattManager1')
 
+            # Register GATT application
+            gatt_manager = bluez.get_interface('org.bluez.GattManager1')
             await gatt_manager.call_register_application(app.path, {})
-            logger.info("✅ BLE server started successfully")
+            logger.info("✅ GATT application registered")
+
+            # Register advertisement
+            le_ad_manager = bluez.get_interface(
+                'org.bluez.LEAdvertisingManager1')
+            await le_ad_manager.call_register_advertisement(advertisement.path, {})
+            logger.info(
+                "✅ Advertisement registered - Device is now discoverable")
+
+            logger.info("BLE server running. Ready for connections.")
 
             # Keep running
             await asyncio.Event().wait()
@@ -182,14 +219,6 @@ class BLEServer:
         except Exception as e:
             logger.error(f"BLE server error: {e}")
             raise
-
-    async def _clean_stale_connections(self):
-        try:
-            import subprocess
-            subprocess.run(['bluetoothctl', 'disconnect'], capture_output=True)
-            logger.info("Cleaned stale connections")
-        except Exception as e:
-            logger.warning(f"Cleanup failed: {e}")
 
     async def stop(self):
         if self.bus:
