@@ -1,5 +1,7 @@
+# ble/ble_server.py
 import asyncio
 import json
+import subprocess
 from dbus_next.aio import MessageBus
 from dbus_next.service import ServiceInterface, method, dbus_property, signal
 from dbus_next.constants import PropertyAccess, BusType
@@ -172,8 +174,47 @@ class BLEServer:
         self.command_handler = command_handler
         self.bus = None
 
+    async def _force_disconnect_all(self):
+        """Force disconnect any connected BLE devices"""
+        try:
+            # Get list of connected devices
+            result = subprocess.run(['bluetoothctl', 'devices'],
+                                    capture_output=True, text=True)
+            devices = result.stdout
+
+            for line in devices.split('\n'):
+                if 'Device' in line:
+                    addr = line.split(' ')[1]
+                    # Disconnect each device
+                    subprocess.run(['bluetoothctl', 'disconnect', addr],
+                                   capture_output=True)
+                    logger.info(f"Force disconnected: {addr}")
+
+            # Also remove bonded devices
+            subprocess.run(['bluetoothctl', 'remove'] + [addr for addr in devices if 'Device' in line],
+                           capture_output=True)
+
+            # Reset the adapter
+            subprocess.run(['bluetoothctl', 'power', 'off'],
+                           capture_output=True)
+            subprocess.run(['bluetoothctl', 'power', 'on'],
+                           capture_output=True)
+            subprocess.run(['bluetoothctl', 'discoverable',
+                           'on'], capture_output=True)
+            subprocess.run(['bluetoothctl', 'pairable', 'on'],
+                           capture_output=True)
+
+            await asyncio.sleep(2)
+            logger.info("BLE adapter reset and ready")
+
+        except Exception as e:
+            logger.warning(f"Force disconnect failed: {e}")
+
     async def start(self):
         try:
+            # Force disconnect any existing connections
+            await self._force_disconnect_all()
+
             # Connect to system bus
             self.bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
 
