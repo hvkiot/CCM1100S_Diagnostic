@@ -76,7 +76,11 @@ class UDSClient:
         """Send raw UDS request with timeout"""
         if not self.iso_tp:
             return None
-        return self.iso_tp.send(payload, timeout)
+        try:
+            return self.iso_tp.send(payload, timeout)
+        except Exception as e:
+            logger.debug(f"Raw request failed: {e}")
+            return None
 
     def read_data_by_identifier(self, did: int) -> Optional[bytes]:
         """Read Data By Identifier (0x22) service"""
