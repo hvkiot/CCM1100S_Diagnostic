@@ -21,16 +21,6 @@ def validate_did(did_str: str) -> int:
     return did
 
 
-def validate_vin(vin: str) -> bool:
-    """Validate VIN format"""
-    if not vin or len(vin) != 17:
-        return False
-
-    # VIN can contain alphanumeric except I, O, Q
-    pattern = r'^[A-HJ-NPR-Z0-9]{17}$'
-    return bool(re.match(pattern, vin.upper()))
-
-
 def validate_hex_data(data_str: str) -> bool:
     """Validate hex data string"""
     try:

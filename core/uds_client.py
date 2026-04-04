@@ -73,28 +73,32 @@ class UDSClient:
         return False
 
     def raw_request(self, payload: bytes, timeout: float = 1.0) -> Optional[bytes]:
-        """Send raw UDS request with timeout"""
+        """Send raw UDS request"""
         if not self.iso_tp:
             return None
-        try:
-            return self.iso_tp.send(payload, timeout)
-        except Exception as e:
-            logger.debug(f"Raw request failed: {e}")
-            return None
+        return self.iso_tp.send(payload, timeout)
 
     def read_data_by_identifier(self, did: int) -> Optional[bytes]:
         """Read Data By Identifier (0x22) service"""
+        # Request: 0x22 + DID (2 bytes)
         payload = bytes([0x22, (did >> 8) & 0xFF, did & 0xFF])
+        logger.debug(f"Sending Read DID 0x{did:04X}: {payload.hex()}")
+
         response = self.iso_tp.send(payload)
 
+        if response:
+            logger.debug(f"Raw response: {response.hex()}")
+
         if response and response[0] == 0x62:
-            logger.info(f"Read DID 0x{did:04X} success")
+            logger.info(
+                f"Read DID 0x{did:04X} success, data length: {len(response)-1}")
             return response[1:]
         elif response and response[0] == 0x7F:
             nrc = response[2]
             logger.error(f"Read DID failed: NRC 0x{nrc:02X}")
             return None
 
+        logger.error(f"No response or invalid response for DID 0x{did:04X}")
         return None
 
     def write_data_by_identifier(self, did: int, data: bytes) -> bool:
@@ -117,24 +121,6 @@ class UDSClient:
             return False
 
         return False
-
-    def read_vin(self) -> Optional[str]:
-        """Read VIN from DID 0x220F"""
-        response = self.read_data_by_identifier(0x220F)
-        if response:
-            try:
-                return response.decode('ascii').strip('\x00')
-            except:
-                return None
-        return None
-
-    def write_vin(self, vin: str) -> bool:
-        """Write VIN to DID 0xF190"""
-        if len(vin) != 17:
-            logger.error(f"VIN must be 17 chars, got {len(vin)}")
-            return False
-
-        return self.write_data_by_identifier(0xF190, vin.encode('ascii'))
 
     def routine_control(self, routine_id: int, subfunction: int, data: bytes = b'') -> Optional[bytes]:
         """Routine Control (0x31) service"""

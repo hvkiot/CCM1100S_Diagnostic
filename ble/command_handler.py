@@ -3,7 +3,7 @@ import asyncio
 from typing import Dict, Any, Optional
 from core.uds_client import UDSClient
 from utils.logger import get_logger
-from utils.validators import validate_vin, validate_did
+from utils.validators import validate_did
 
 logger = get_logger(__name__)
 
@@ -15,10 +15,6 @@ class CommandHandler:
         self.uds_client = uds_client
         self._pending_operations = {}
 
-    async def _process_command(self, message: Dict[str, Any]) -> Dict[str, Any]:
-        """Alias for handle_command - maintains compatibility"""
-        return await self.handle_command(message)
-
     async def handle_command(self, command: Dict[str, Any]) -> Dict[str, Any]:
         """Route command to appropriate handler"""
         cmd_type = command.get('command')
@@ -27,8 +23,6 @@ class CommandHandler:
         handlers = {
             'read_did': self._handle_read_did,
             'write_did': self._handle_write_did,
-            'read_vin': self._handle_read_vin,
-            'write_vin': self._handle_write_vin,
             'security_access': self._handle_security_access,
             'diagnostic_session': self._handle_diagnostic_session,
             'routine_control': self._handle_routine_control,
@@ -90,33 +84,6 @@ class CommandHandler:
 
         except Exception as e:
             return {'success': False, 'error': str(e)}
-
-    async def _handle_read_vin(self, command: Dict) -> Dict:
-        """Handle read VIN request"""
-        vin = await asyncio.get_event_loop().run_in_executor(
-            None, self.uds_client.read_vin
-        )
-
-        if vin:
-            return {'success': True, 'vin': vin}
-        else:
-            return {'success': False, 'error': 'Failed to read VIN'}
-
-    async def _handle_write_vin(self, command: Dict) -> Dict:
-        """Handle write VIN request"""
-        vin = command.get('vin', '')
-
-        if not validate_vin(vin):
-            return {'success': False, 'error': 'Invalid VIN format'}
-
-        success = await asyncio.get_event_loop().run_in_executor(
-            None, self.uds_client.write_vin, vin
-        )
-
-        return {
-            'success': success,
-            'message': 'VIN written successfully' if success else 'VIN write failed'
-        }
 
     async def _handle_security_access(self, command: Dict) -> Dict:
         """Handle security access request"""
