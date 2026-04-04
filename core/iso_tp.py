@@ -17,13 +17,14 @@ class ISOTPHandler:
         """Send Single Frame (SF) - PCI byte = 0x0N where N is length"""
         length = len(payload)
         # PCI byte: bits 7-4 = 0 (SF type), bits 3-0 = length
-        pci_byte = length & 0x0F  # Max 7 bytes for SF
+        # For UDS, the length includes the UDS service byte
+        pci_byte = length & 0x0F
         frame = bytearray([pci_byte]) + payload
-        # Pad to 8 bytes
+        # Pad to 8 bytes exactly
         while len(frame) < 8:
             frame.append(0x00)
         self.send_frame(bytes(frame))
-        logger.debug(f"TX SF: {frame.hex()}")
+        logger.info(f"TX SF: {frame.hex()}")  # Change to INFO to see in logs
 
     def _send_multi_frame(self, payload: bytes) -> bool:
         """Send multi-frame message (FF + CF)"""

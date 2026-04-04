@@ -78,24 +78,13 @@ class UDSClient:
     def read_data_by_identifier(self, did: int) -> Optional[bytes]:
         """Read Data By Identifier (0x22) service"""
         payload = bytes([0x22, (did >> 8) & 0xFF, did & 0xFF])
-        logger.debug(f"Sending Read DID 0x{did:04X}: {payload.hex()}")
+        # Change to INFO
+        logger.info(f"Sending Read DID 0x{did:04X}: payload={payload.hex()}")
 
         response = self.iso_tp.send(payload)
 
         if response:
-            logger.debug(f"Raw response: {response.hex()}")
-
-        if response and response[0] == 0x62:
-            logger.info(
-                f"Read DID 0x{did:04X} success, data length: {len(response)-1}")
-            return response[1:]
-        elif response and response[0] == 0x7F:
-            nrc = response[2]
-            logger.error(f"Read DID failed: NRC 0x{nrc:02X}")
-            return None
-
-        logger.error(f"No response or invalid response for DID 0x{did:04X}")
-        return None
+            logger.info(f"Raw response: {response.hex()}")  # Change to INFO
 
     def write_data_by_identifier(self, did: int, data: bytes) -> bool:
         """Write Data By Identifier (0x2E) service"""
