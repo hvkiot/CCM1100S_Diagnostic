@@ -20,6 +20,7 @@ class UDSBLEBridge:
         self.command_handler = None
         self.ble_server = None
         self._running = False
+        self._ble_task = None
 
     async def initialize(self) -> bool:
         logger.info("Initializing UDS-BLE Bridge...")
@@ -45,6 +46,13 @@ class UDSBLEBridge:
         logger.info("Shutting down...")
         self._running = False
 
+        if self._ble_task:
+            self._ble_task.cancel()
+            try:
+                await self._ble_task
+            except:
+                pass
+
         if self.ble_server:
             await self.ble_server.stop()
         if self.uds_client:
@@ -59,15 +67,17 @@ class UDSBLEBridge:
             try:
                 # Initialize connection
                 if await self.initialize():
-                    logger.info("Bridge running. Ready for BLE connections...")
+                    logger.info("Bridge running. Starting BLE server...")
 
-                    # Keep running - no health check
+                    # Start BLE server as a background task
+                    self._ble_task = asyncio.create_task(
+                        self.ble_server.start())
+
+                    logger.info("Ready for BLE connections...")
+
+                    # Keep running
                     while self._running:
                         await asyncio.sleep(1)
-
-                        # Only check if connection is still alive when we have activity
-                        # Don't proactively ping the ECU
-                        pass
                 else:
                     logger.error(
                         "Initialization failed, retrying in 5 seconds...")
