@@ -91,14 +91,19 @@ class Characteristic(ServiceInterface):
     async def _process_command_background(self, message):
         """Background worker to talk to ECU and then notify phone"""
         try:
-            # 3. Talk to the ECU (This can take 100ms - 2s)
+            # Add a small delay to ensure the write completes
+            await asyncio.sleep(0.1)
+
+            # Talk to the ECU
             response = await self.command_handler.handle_command(message)
 
-            # 4. Only notify once the ECU actually responds
+            # Only notify once the ECU actually responds
             if self.notifying:
                 response_json = json.dumps(response)
-                # Convert to bytes for dbus-next
                 response_bytes = response_json.encode('utf-8')
+
+                # Add another small delay before sending
+                await asyncio.sleep(0.1)
 
                 # Emit the signal
                 self.Notify(response_bytes)
@@ -234,7 +239,7 @@ class BLEServer:
             service = Service(SERVICE_UUID, True)
             characteristic = Characteristic(
                 CHARACTERISTIC_UUID,
-                ['read', 'write', 'notify'],
+                ['read', 'write', 'indicate'],
                 service.path,
                 self.command_handler
             )
