@@ -1,4 +1,3 @@
-# /core/can_bus.py
 import can
 from typing import Optional
 from config.settings import CANConfig
@@ -19,6 +18,9 @@ class CANBusManager:
     def connect(self) -> bool:
         """Establish CAN bus connection"""
         try:
+            # Shutdown any existing bus first
+            self.disconnect()
+
             self.bus = can.interface.Bus(
                 interface=self.config.interface,
                 channel=self.config.channel,
@@ -32,16 +34,21 @@ class CANBusManager:
             return False
 
     def disconnect(self):
-        """Shutdown CAN bus connection"""
+        """Shutdown CAN bus connection properly"""
         if self.bus:
-            self.bus.shutdown()
-            self._is_connected = False
-            logger.info("CAN bus disconnected")
+            try:
+                self.bus.shutdown()
+            except Exception as e:
+                logger.debug(f"Error during bus shutdown: {e}")
+            finally:
+                self.bus = None
+                self._is_connected = False
+                logger.info("CAN bus disconnected")
 
     def send_message(self, arbitration_id: int, data: bytes, is_extended: bool = True) -> bool:
         """Send CAN message"""
-        if not self._is_connected:
-            logger.error("CAN bus not connected")
+        if not self._is_connected or not self.bus:
+            logger.debug("CAN bus not connected")
             return False
 
         try:
@@ -68,5 +75,5 @@ class CANBusManager:
                 logger.debug(f"RX: {hex(msg.arbitration_id)} {msg.data.hex()}")
                 return msg
         except Exception as e:
-            logger.debug(f"Receive timeout: {e}")
+            pass
         return None

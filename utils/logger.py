@@ -1,39 +1,30 @@
-# /utils/logger.py
 import logging
-import structlog
-from structlog.processors import JSONRenderer, TimeStamper
 import sys
 
 
 def setup_logger(level="INFO"):
-    """Configure structured logging"""
+    """Configure simple readable logging"""
 
-    # Configure structlog
-    structlog.configure(
-        processors=[
-            structlog.stdlib.filter_by_level,
-            structlog.stdlib.add_logger_name,
-            structlog.stdlib.add_log_level,
-            structlog.stdlib.PositionalArgumentsFormatter(),
-            TimeStamper(fmt="iso"),
-            structlog.processors.StackInfoRenderer(),
-            structlog.processors.format_exc_info,
-            structlog.processors.UnicodeDecoder(),
-            JSONRenderer()
-        ],
-        context_class=dict,
-        logger_factory=structlog.stdlib.LoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
+    # Remove any existing handlers
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
 
     # Configure root logger
     logging.basicConfig(
-        format="%(message)s",
         level=getattr(logging, level.upper()),
+        format='%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
+        datefmt='%H:%M:%S',
         stream=sys.stdout
     )
 
+    # Set specific log levels
+    logging.getLogger('core.can_bus').setLevel(logging.INFO)
+    logging.getLogger('core.uds_client').setLevel(logging.INFO)
+    logging.getLogger('ble').setLevel(logging.INFO)
+    logging.getLogger('__main__').setLevel(logging.INFO)
+
 
 def get_logger(name):
-    """Get structured logger"""
-    return structlog.get_logger(name)
+    """Get simple logger"""
+    return logging.getLogger(name)

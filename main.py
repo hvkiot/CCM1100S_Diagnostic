@@ -96,6 +96,7 @@ class UDSBLEBridge:
                     continue
 
                 # If we get here, connection was lost - cleanup and retry
+                logger.info("Cleaning up before retry...")
                 await self.shutdown()
                 await asyncio.sleep(3)
 

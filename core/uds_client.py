@@ -28,6 +28,9 @@ class UDSClient:
 
     def connect(self) -> bool:
         """Establish connection to ECU"""
+        # Ensure clean state first
+        self.disconnect()
+
         if not self.can_manager.connect():
             return False
 
@@ -36,7 +39,7 @@ class UDSClient:
             can_receiver=self._receive_can_frame
         )
 
-        # Try to switch to extended session, but don't fail if ECU not ready
+        # Try to switch to extended session
         try:
             return self._diagnostic_session_control(UDSSessionType.EXTENDED)
         except Exception as e:
