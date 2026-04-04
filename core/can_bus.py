@@ -64,8 +64,8 @@ class CANBusManager:
             logger.error(f"Failed to send message: {e}")
             return False
 
-    def receive_message(self, timeout: float = 1.0) -> Optional[can.Message]:
-        """Receive CAN message with timeout"""
+    def receive_message(self, timeout: float = 2.0) -> Optional[can.Message]:
+        """Receive CAN message with timeout - increased for multi-frame"""
         if not self._is_connected or not self.bus:
             return None
 
