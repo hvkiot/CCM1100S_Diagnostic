@@ -70,10 +70,10 @@ class Characteristic(ServiceInterface):
 
             if self.notifying:
                 response_json = json.dumps(response)
-                # Convert to list of ints for dbus
-                response_bytes = [b for b in response_json.encode('utf-8')]
+                # Send as bytes, NOT list
+                response_bytes = response_json.encode('utf-8')
 
-                # Emit the signal
+                # Emit the signal - pass bytes directly
                 self.Notify(response_bytes)
                 logger.info(f"✅ ECU Response sent: {response_json}")
             else:
