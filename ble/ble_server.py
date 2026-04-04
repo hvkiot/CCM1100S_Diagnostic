@@ -101,7 +101,7 @@ class Characteristic(ServiceInterface):
                 response_bytes = response_json.encode('utf-8')
 
                 # Emit the signal
-                self.Notify(list(response_bytes))
+                self.Notify(response_bytes)
                 logger.info(f"✅ ECU Response pushed to App: {response_json}")
 
         except Exception as e:
