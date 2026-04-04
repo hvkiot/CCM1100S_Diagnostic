@@ -71,6 +71,7 @@ class CANBusManager:
             if msg:
                 logger.debug(f"RX: {hex(msg.arbitration_id)} {msg.data.hex()}")
                 return msg
+            return None  # Explicitly return None on timeout
         except Exception as e:
-            pass
-        return None
+            logger.debug(f"Receive error: {e}")
+            return None

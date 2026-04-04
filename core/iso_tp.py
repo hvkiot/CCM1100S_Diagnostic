@@ -116,28 +116,39 @@ class ISOTPHandler:
                 continue
 
             data = msg if isinstance(msg, bytes) else bytes(msg)
-            logger.debug(f"RX raw: {data.hex()}")
+            logger.info(f"RX raw: {data.hex()}")  # Changed to INFO
+
+            # Check if we have valid data
+            if len(data) == 0 or data[0] == 0:
+                logger.debug("Empty or zero frame, continuing...")
+                continue
 
             pci_type = (data[0] >> 4) & 0x0F
+            logger.info(f"PCI type: {pci_type}")
 
             # Single Frame (SF)
             if pci_type == 0:
                 length = data[0] & 0x0F
-                response = data[1:1+length]
-                logger.debug(f"RX SF response: {response.hex()}")
-                return bytes(response)
+                if length > 0 and length <= len(data) - 1:
+                    response = data[1:1+length]
+                    logger.info(f"RX SF response: {response.hex()}")
+                    return bytes(response)
+                else:
+                    logger.warning(
+                        f"Invalid SF length: {length}, data len: {len(data)}")
+                    continue
 
             # First Frame (FF) - multi-frame response
             elif pci_type == 1:
                 total_len = ((data[0] & 0x0F) << 8) | data[1]
                 response = bytearray(data[2:8])  # First 6 bytes
-                logger.debug(
+                logger.info(
                     f"RX FF: total_len={total_len}, first={response.hex()}")
 
                 # Send Flow Control (FC)
                 fc = bytes([0x30, 0x00, 0x00, 0, 0, 0, 0, 0])
                 self.send_frame(fc)
-                logger.debug(f"TX FC: {fc.hex()}")
+                logger.info(f"TX FC: {fc.hex()}")
 
                 # Receive Consecutive Frames (CF)
                 cf_timeout = time.time() + 2.0
@@ -161,8 +172,8 @@ class ISOTPHandler:
                         response.extend(cf_data[1:8])
                         expected_seq = (expected_seq + 1) & 0x0F
                         cf_timeout = time.time() + 2.0
-                        logger.debug(
-                            f"RX CF (seq={seq_num}): added {len(cf_data[1:8])} bytes, total={len(response)}/{total_len}")
+                        logger.info(
+                            f"RX CF (seq={seq_num}): total={len(response)}/{total_len}")
                     else:
                         logger.error(
                             f"Unexpected PCI type in response: {cf_pci}")
@@ -170,7 +181,7 @@ class ISOTPHandler:
 
                 if len(response) >= total_len:
                     result = bytes(response[:total_len])
-                    logger.debug(
+                    logger.info(
                         f"RX complete multi-frame response: {result.hex()}")
                     return result
                 else:
