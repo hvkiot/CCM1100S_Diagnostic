@@ -51,15 +51,7 @@ class Characteristic(ServiceInterface):
             message = json.loads(decoded)
             logger.info(f"📥 Received: {message.get('command')}")
 
-            # Process command using your command handler
-            response = await self.command_handler.handle_command(message)
-
-            if self.notifying:
-                response_json = json.dumps(response)
-                # Send as bytes, NOT list
-                response_bytes = response_json.encode('utf-8')
-                self.Notify(response_bytes)
-                logger.info(f"✅ Response sent: {response_json}")
+            asyncio.create_task(self._process_command_background(message))
 
         except Exception as e:
             logger.error(f"Write error: {e}")
@@ -95,6 +87,25 @@ class Characteristic(ServiceInterface):
 
         except Exception as e:
             logger.error(f"Response error: {e}")
+
+    async def _process_command_background(self, message):
+        """Background worker to talk to ECU and then notify phone"""
+        try:
+            # 3. Talk to the ECU (This can take 100ms - 2s)
+            response = await self.command_handler.handle_command(message)
+
+            # 4. Only notify once the ECU actually responds
+            if self.notifying:
+                response_json = json.dumps(response)
+                # Convert to bytes for dbus-next
+                response_bytes = response_json.encode('utf-8')
+
+                # Emit the signal
+                self.Notify(list(response_bytes))
+                logger.info(f"✅ ECU Response pushed to App: {response_json}")
+
+        except Exception as e:
+            logger.error(f"❌ Background Process error: {e}")
 
 
 class Service(ServiceInterface):
