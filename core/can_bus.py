@@ -1,8 +1,8 @@
+# core/can_bus.py
 import can
 from typing import Optional
 from config.settings import CANConfig
 from utils.logger import get_logger
-import time
 
 logger = get_logger(__name__)
 
@@ -18,7 +18,6 @@ class CANBusManager:
     def connect(self) -> bool:
         """Establish CAN bus connection"""
         try:
-            # Shutdown any existing bus first
             self.disconnect()
 
             self.bus = can.interface.Bus(
@@ -34,21 +33,19 @@ class CANBusManager:
             return False
 
     def disconnect(self):
-        """Shutdown CAN bus connection properly"""
+        """Shutdown CAN bus connection"""
         if self.bus:
             try:
                 self.bus.shutdown()
-            except Exception as e:
-                logger.debug(f"Error during bus shutdown: {e}")
-            finally:
-                self.bus = None
-                self._is_connected = False
-                logger.info("CAN bus disconnected")
+            except:
+                pass
+            self.bus = None
+            self._is_connected = False
+            logger.info("CAN bus disconnected")
 
     def send_message(self, arbitration_id: int, data: bytes, is_extended: bool = True) -> bool:
         """Send CAN message"""
         if not self._is_connected or not self.bus:
-            logger.debug("CAN bus not connected")
             return False
 
         try:
@@ -64,14 +61,14 @@ class CANBusManager:
             logger.error(f"Failed to send message: {e}")
             return False
 
-    def receive_message(self, timeout: float = 2.0) -> Optional[can.Message]:
-        """Receive CAN message with timeout - increased for multi-frame"""
+    def receive_message(self, timeout: float = 1.0) -> Optional[can.Message]:
+        """Receive CAN message - accept any ID"""
         if not self._is_connected or not self.bus:
             return None
 
         try:
             msg = self.bus.recv(timeout)
-            if msg and msg.arbitration_id == self.config.rx_id:
+            if msg:
                 logger.debug(f"RX: {hex(msg.arbitration_id)} {msg.data.hex()}")
                 return msg
         except Exception as e:
