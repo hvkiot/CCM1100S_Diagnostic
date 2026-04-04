@@ -43,6 +43,7 @@ class Characteristic(ServiceInterface):
     async def WriteValue(self, value: 'ay', options: 'a{sv}'):
         """Handle write from Flutter app"""
         try:
+            # value comes as bytes already
             data = bytes(value)
             decoded = data.decode('utf-8')
             message = json.loads(decoded)
@@ -53,7 +54,8 @@ class Characteristic(ServiceInterface):
 
             if self.notifying:
                 response_json = json.dumps(response)
-                response_bytes = list(response_json.encode('utf-8'))
+                # Send as bytes, NOT list
+                response_bytes = response_json.encode('utf-8')
                 self.Notify(response_bytes)
                 logger.info(f"✅ Response sent: {response_json}")
 
@@ -82,7 +84,8 @@ class Characteristic(ServiceInterface):
 
             if self.notifying:
                 response_json = json.dumps(response)
-                response_bytes = list(response_json.encode('utf-8'))
+                # Convert to bytes, NOT list
+                response_bytes = response_json.encode('utf-8')
                 self.Notify(response_bytes)
                 logger.info("✅ Notification sent")
             else:
