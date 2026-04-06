@@ -74,7 +74,7 @@ class Characteristic(ServiceInterface):
                 response_bytes = response_json.encode('utf-8')
 
                 # Emit the signal - pass bytes directly
-                self.Notify(response_bytes)
+                self.send_notification(response_bytes)
                 logger.info(f"✅ ECU Response sent: {response_json}")
             else:
                 logger.warning("Notifications disabled - response not sent")
@@ -92,9 +92,19 @@ class Characteristic(ServiceInterface):
         self.notifying = False
         logger.info("Notifications disabled")
 
-    @signal()
-    def Notify(self, value: 'ay') -> 'ay':
-        return value
+    def send_notification(self, data: bytes):
+        if not self.notifying:
+            logger.warning("Notifications not enabled")
+            return
+
+        # 🔥 Update characteristic value
+        self.emit_properties_changed(
+            'org.bluez.GattCharacteristic1',
+            {
+                'Value': Variant('ay', list(data))
+            },
+            []
+        )
 
 
 class Service(ServiceInterface):
