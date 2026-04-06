@@ -106,8 +106,8 @@ class ISOTPHandler:
         # Receive response - longer timeout for multi-frame
         return self._receive_response(timeout)
 
-    def _receive_response(self, timeout: float = 2.0) -> Optional[bytes]:
-        """Receive and parse UDS response"""
+    def _receive_response(self, timeout: float = 5.0) -> Optional[bytes]:
+        """Receive and parse UDS response - increased timeout for security"""
         start = time.time()
 
         while time.time() - start < timeout:
@@ -116,88 +116,60 @@ class ISOTPHandler:
                 continue
 
             data = msg if isinstance(msg, bytes) else bytes(msg)
-            logger.info(f"RX raw: {data.hex()}")  # Changed to INFO
-
-            # Check if we have valid data
-            if len(data) == 0 or data[0] == 0:
-                logger.debug("Empty or zero frame, continuing...")
-                continue
+            logger.info(f"RX raw: {data.hex()}")
 
             pci_type = (data[0] >> 4) & 0x0F
-            logger.info(f"PCI type: {pci_type}")
 
-            # Single Frame (SF)
+            # Single Frame
             if pci_type == 0:
                 length = data[0] & 0x0F
-                if length > 0 and length <= len(data) - 1:
-                    response = data[1:1+length]
-                    logger.info(f"RX SF response: {response.hex()}")
-                    return bytes(response)
-                else:
-                    logger.warning(
-                        f"Invalid SF length: {length}, data len: {len(data)}")
-                    continue
+                response = data[1:1+length]
+                logger.info(f"RX SF response: {response.hex()}")
+                return bytes(response)
 
             # First Frame (FF) - multi-frame response
             elif pci_type == 1:
                 total_len = ((data[0] & 0x0F) << 8) | data[1]
-                response = bytearray(data[2:8])  # First 6 bytes
+                response = bytearray(data[2:8])
                 logger.info(
                     f"RX FF: total_len={total_len}, first={response.hex()}")
 
-                # Send Flow Control (FC) - Increase block size and reduce STmin
-                # Block size=10, STmin=0
+                # Send Flow Control
                 fc = bytes([0x30, 0x0A, 0x00, 0, 0, 0, 0, 0])
                 self.send_frame(fc)
                 logger.info(f"TX FC: {fc.hex()}")
 
-                # Receive Consecutive Frames (CF)
-                cf_timeout = time.time() + 3.0  # Longer timeout for multi-frame
+                # Receive consecutive frames with longer timeout
+                cf_timeout = time.time() + 5.0
                 expected_seq = 1
-                cf_count = 0
-                max_cf = 20  # Maximum expected consecutive frames
 
-                while len(response) < total_len and time.time() < cf_timeout and cf_count < max_cf:
+                while len(response) < total_len and time.time() < cf_timeout:
                     cf_msg = self.recv_frame(0.5)
                     if cf_msg is None:
-                        logger.debug("Waiting for CF...")
                         continue
 
                     cf_data = cf_msg if isinstance(
                         cf_msg, bytes) else bytes(cf_msg)
                     cf_pci = (cf_data[0] >> 4) & 0x0F
 
-                    if cf_pci == 2:  # Consecutive Frame
+                    if cf_pci == 2:
                         seq_num = cf_data[0] & 0x0F
-                        if seq_num != expected_seq:
-                            logger.warning(
-                                f"Sequence mismatch: expected {expected_seq}, got {seq_num}")
-
-                        # Add the 7 bytes of data from CF
                         response.extend(cf_data[1:8])
                         expected_seq = (expected_seq + 1) & 0x0F
-                        cf_count += 1
-                        cf_timeout = time.time() + 3.0  # Reset timeout
+                        cf_timeout = time.time() + 5.0
                         logger.info(
-                            f"RX CF (seq={seq_num}): total={len(response)}/{total_len}, cf_count={cf_count}")
-                    elif cf_pci == 1:
-                        # Another First Frame? This shouldn't happen
-                        logger.error(
-                            "Unexpected FF during multi-frame reception")
-                        return None
+                            f"RX CF (seq={seq_num}): total={len(response)}/{total_len}")
                     else:
-                        logger.debug(f"Ignoring non-CF frame: PCI={cf_pci}")
+                        logger.warning(f"Unexpected PCI: {cf_pci}")
                         continue
 
                 if len(response) >= total_len:
                     result = bytes(response[:total_len])
-                    logger.info(
-                        f"RX complete multi-frame response: {result.hex()}")
+                    logger.info(f"RX complete: {result.hex()}")
                     return result
                 else:
                     logger.error(
-                        f"Incomplete response: got {len(response)} of {total_len} bytes after {cf_count} CFs")
+                        f"Incomplete: got {len(response)} of {total_len}")
                     return None
 
-        logger.error("Timeout waiting for response")
         return None
