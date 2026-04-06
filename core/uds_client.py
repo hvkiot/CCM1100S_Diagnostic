@@ -117,38 +117,38 @@ class UDSClient:
         elif did in [0xF18C, 0xF192]:
             if len(data) >= 4:
                 value = int.from_bytes(data[:4], byteorder='big')
-                return str(value).encode('ascii')
+                return str(value).encode('utf-8')
 
         # System Voltage (0.1V resolution)
         elif did == 0x220F:
             if len(data) >= 2:
                 raw = int.from_bytes(data[:2], byteorder='big')
                 voltage = raw / 10.0
-                return f"{voltage:.1f}V".encode('ascii')
+                return f"{voltage:.1f}V".encode('utf-8')
 
         # Axle Angles (signed, 0.1 degree resolution)
         elif did in [0x2210, 0x2211, 0x2212]:
             if len(data) >= 2:
                 raw = int.from_bytes(data[:2], byteorder='big', signed=True)
                 angle = raw / 10.0
-                return f"{angle:.1f}°".encode('ascii')
+                return f"{angle:.1f}°".encode('utf-8')
 
         # Axle Control Percentages (signed, 1% resolution)
         elif did in [0x2213, 0x2214]:
             if len(data) >= 2:
                 percentage = int.from_bytes(
                     data[:2], byteorder='big', signed=True)
-                return f"{percentage}%".encode('ascii')
+                return f"{percentage}%".encode('utf-8')
 
         # Min/Max Axle Currents (signed, 1mA resolution)
         elif did in [0x2215, 0x2216, 0x2217, 0x2218, 0x2219, 0x221A, 0x221B, 0x221C]:
             if len(data) >= 2:
                 current = int.from_bytes(
                     data[:2], byteorder='big', signed=True)
-                return f"{current}mA".encode('ascii')
+                return f"{current}mA".encode('utf-8')
 
         # Default: return raw hex as string
-        return data.hex().encode('ascii')
+        return data.hex().encode('utf-8')
 
     def write_data_by_identifier(self, did: int, data: bytes) -> bool:
         """Write Data By Identifier (0x2E) service"""
