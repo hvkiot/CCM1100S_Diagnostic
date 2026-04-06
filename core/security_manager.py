@@ -24,53 +24,56 @@ class SecurityManager:
         logger.debug(f"Calculated key: {key.hex()}")
         return key
 
-    def do_security_access(self, uds_client, level: int = 0x01) -> bool:
-        """Perform security access sequence - handles multi-frame seed"""
+    def do_security_access(self, uds_client, level: int = 0x03) -> bool:
+        """Perform security access sequence - try level 0x03"""
         logger.info("Starting security access...")
 
-        # Step 1: Request seed
-        seed_response = uds_client.raw_request(bytes([0x27, level]))
+        # Try multiple levels
+        for test_level in [0x03, 0x05, 0x07, 0x09, 0x01]:
+            logger.info(f"Trying security level 0x{test_level:02X}")
 
-        if not seed_response:
-            logger.error("No response to seed request")
-            return False
+            # Step 1: Request seed
+            seed_response = uds_client.raw_request(bytes([0x27, test_level]))
 
-        # Check for positive response (0x67) - handles both single and multi-frame
-        if seed_response[0] != 0x67:
-            nrc = seed_response[2] if len(seed_response) > 2 else 0x00
-            logger.error(
-                f"Failed to get seed. Response: {seed_response.hex()}, NRC: 0x{nrc:02X}")
-            return False
+            if not seed_response:
+                logger.warning(f"No response for level 0x{test_level:02X}")
+                continue
 
-        # Extract seed - skip 0x67 and level byte
-        if len(seed_response) >= 3:
-            seed = seed_response[2:]
-            logger.info(f"Received seed ({len(seed)} bytes): {seed.hex()}")
-        else:
-            logger.error(f"Invalid seed response length: {len(seed_response)}")
-            return False
+            # Check for positive response (0x67)
+            if seed_response[0] == 0x67:
+                seed = seed_response[2:]
+                logger.info(
+                    f"✅ Got seed for level 0x{test_level:02X}: {seed.hex()}")
 
-        # Step 2: Calculate key
-        try:
-            key = self.calculate_key(seed)
-            logger.info(f"Calculated key: {key.hex()}")
-        except Exception as e:
-            logger.error(f"Key calculation failed: {e}")
-            return False
+                # Step 2: Calculate key
+                try:
+                    key = self.calculate_key(seed)
+                    logger.info(f"Calculated key: {key.hex()}")
+                except Exception as e:
+                    logger.error(f"Key calculation failed: {e}")
+                    continue
 
-        # Step 3: Send key
-        verify_response = uds_client.raw_request(
-            bytes([0x27, level + 1]) + key)
+                # Step 3: Send key
+                verify_response = uds_client.raw_request(
+                    bytes([0x27, test_level + 1]) + key)
 
-        if verify_response and verify_response[0] == 0x67:
-            self._is_unlocked = True
-            logger.info("✅ Security access granted!")
-            return True
-        else:
-            nrc = verify_response[2] if verify_response and len(
-                verify_response) > 2 else 0x00
-            logger.error(f"Security access denied. NRC: 0x{nrc:02X}")
-            return False
+                if verify_response and verify_response[0] == 0x67:
+                    self._is_unlocked = True
+                    logger.info(
+                        f"✅ Security access granted at level 0x{test_level:02X}!")
+                    return True
+                else:
+                    nrc = verify_response[2] if verify_response and len(
+                        verify_response) > 2 else 0x00
+                    logger.warning(
+                        f"Key rejected for level 0x{test_level:02X}, NRC: 0x{nrc:02X}")
+            else:
+                nrc = seed_response[2] if len(seed_response) > 2 else 0x00
+                logger.warning(
+                    f"Seed request failed for level 0x{test_level:02X}: NRC 0x{nrc:02X}")
+
+        logger.error("All security levels failed")
+        return False
 
     @property
     def is_unlocked(self) -> bool:
