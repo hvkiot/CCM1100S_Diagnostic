@@ -97,13 +97,9 @@ class Characteristic(ServiceInterface):
             logger.warning("Notifications not enabled")
             return
 
-        self.emit_properties_changed(
-            'org.bluez.GattCharacteristic1',
-            {
-                'Value': Variant('ay', data)
-            },
-            []
-        )
+        self.emit_properties_changed({
+            'Value': Variant('ay', data)
+        })
 
 
 class Service(ServiceInterface):
