@@ -49,6 +49,17 @@ class SecurityManager:
             # Check if response is valid (0x67 is positive response for 0x27)
             if seed_response and seed_response[0] == 0x67:
                 seed = seed_response[2:]
+
+                # ----------------------------------------------------
+                # 🛑 THE MISSING UDS STANDARD CHECK 🛑
+                # If seed is all zeros, the ECU is already unlocked.
+                # ----------------------------------------------------
+                if all(b == 0 for b in seed):
+                    self._is_unlocked = True
+                    logger.info(
+                        "✅ ECU is ALREADY unlocked (Seed is all zeros)")
+                    return True
+
                 logger.info(f"✅ Got valid seed: {seed.hex()}")
 
                 # Calculate and send key
