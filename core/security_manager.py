@@ -28,29 +28,30 @@ class SecurityManager:
         """Perform security access sequence"""
         logger.info("Starting security access...")
 
-        # Critical: Wait for ECU to be ready
-        time.sleep(0.3)
+        # Send Tester Present to keep session alive
+        logger.info("Sending Tester Present...")
+        uds_client.raw_request(bytes([0x3E, 0x00]))
+        time.sleep(0.2)
 
-        # Step 1: Request seed
-        logger.info("Requesting seed...")
-        seed_response = uds_client.raw_request(bytes([0x27, level]))
+        # Step 1: Request seed (may need retry)
+        for attempt in range(3):
+            logger.info(f"Requesting seed (attempt {attempt+1})...")
+            seed_response = uds_client.raw_request(bytes([0x27, level]))
 
-        if not seed_response:
-            logger.error("No response to seed request")
-            return False
+            if seed_response and seed_response[0] == 0x67:
+                break
 
-        # Check if we got a multi-frame response (0x10) or positive response (0x67)
-        if seed_response[0] == 0x10:
-            # This is a First Frame - we need to extract the actual response
-            # The ISO-TP layer should have already reassembled it
-            logger.error(
-                f"Got multi-frame header instead of response: {seed_response.hex()}")
-            return False
-
-        if seed_response[0] != 0x67:
-            nrc = seed_response[2] if len(seed_response) > 2 else 0x00
-            logger.error(
-                f"Failed to get seed. Response: {seed_response.hex()}, NRC: 0x{nrc:02X}")
+            if seed_response and seed_response[0] == 0x7F:
+                nrc = seed_response[2] if len(seed_response) > 2 else 0x00
+                logger.warning(f"Attempt {attempt+1} failed: NRC 0x{nrc:02X}")
+                time.sleep(0.3)
+                continue
+            else:
+                logger.warning(
+                    f"Attempt {attempt+1} failed: no valid response")
+                time.sleep(0.3)
+        else:
+            logger.error("All attempts to get seed failed")
             return False
 
         seed = seed_response[2:]
