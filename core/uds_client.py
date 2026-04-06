@@ -73,7 +73,10 @@ class UDSClient:
         """Send raw UDS request"""
         if not self.iso_tp:
             return None
-        return self.iso_tp.send(payload, timeout)
+        response = self.iso_tp.send(payload, timeout)
+        if response:
+            logger.info(f"Raw response: {response.hex()}")
+        return response
 
     def read_data_by_identifier(self, did: int) -> Optional[bytes]:
         """Read Data By Identifier (0x22) service"""
