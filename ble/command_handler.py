@@ -38,30 +38,34 @@ class CommandHandler:
             return {'error': f'Unknown command: {cmd_type}', 'id': cmd_id}
 
     async def _handle_read_did(self, command: Dict) -> Dict:
-        """Handle read DID request"""
         did_str = command.get('did', '')
 
         try:
             did = validate_did(did_str)
-            data = await asyncio.get_event_loop().run_in_executor(
+            scaled_data = await asyncio.get_event_loop().run_in_executor(
                 None, self.uds_client.read_data_by_identifier, did
             )
 
-            if data:
+            if scaled_data:
+                # Try to decode as ASCII for display
+                try:
+                    ascii_value = scaled_data.decode('ascii', errors='ignore')
+                except:
+                    ascii_value = scaled_data.hex()
+
                 return {
                     'success': True,
                     'did': f"0x{did:04X}",
-                    'data': data.hex(),
-                    'ascii': self._try_decode_ascii(data)
+                    'data': scaled_data.hex() if not isinstance(scaled_data, bytes) else scaled_data.hex(),
+                    'value': ascii_value,  # Human readable value
+                    'raw': scaled_data.hex(),
+                    'id': command.get('id')
                 }
             else:
-                return {'success': False, 'error': 'No response from ECU'}
+                return {'success': False, 'error': 'No response from ECU', 'id': command.get('id')}
 
-        except ValueError as e:
-            return {'success': False, 'error': str(e)}
         except Exception as e:
-            logger.exception("Read DID failed")
-            return {'success': False, 'error': f'Communication error: {e}'}
+            return {'success': False, 'error': str(e), 'id': command.get('id')}
 
     async def _handle_write_did(self, command: Dict) -> Dict:
         """Handle write DID request"""

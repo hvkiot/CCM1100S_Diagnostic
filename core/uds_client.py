@@ -82,20 +82,21 @@ class UDSClient:
         return response
 
     def read_data_by_identifier(self, did: int) -> Optional[bytes]:
-        """Read Data By Identifier (0x22) service"""
+        """Read Data By Identifier (0x22) service with auto-scaling"""
         payload = bytes([0x22, (did >> 8) & 0xFF, did & 0xFF])
         logger.info(f"Sending Read DID 0x{did:04X}: payload={payload.hex()}")
 
         response = self.iso_tp.send(payload)
 
-        if response:
-            logger.info(f"Raw response: {response.hex()}")
-
-        # Check for valid response - Response code 0x62 means success
         if response and len(response) > 0 and response[0] == 0x62:
+            raw_data = response[1:]
             logger.info(
-                f"Read DID 0x{did:04X} success, data length: {len(response)-1}")
-            return response[1:]  # Return data without the 0x62 response code
+                f"Read DID 0x{did:04X} success, raw data: {raw_data.hex()}")
+
+            # Scale the data based on DID
+            scaled_data = self._scale_did_data(did, raw_data)
+            return scaled_data
+
         elif response and response[0] == 0x7F:
             nrc = response[2] if len(response) > 2 else 0x00
             logger.error(f"Read DID failed: NRC 0x{nrc:02X}")
@@ -103,6 +104,50 @@ class UDSClient:
 
         logger.error(f"No response or invalid response for DID 0x{did:04X}")
         return None
+
+    def _scale_did_data(self, did: int, data: bytes) -> bytes:
+        """Scale raw hex data to human-readable format"""
+
+        # ASCII Strings (return as-is)
+        if did in [0xF190, 0xF191, 0xF187, 0xF188, 0xF1A0, 0xF1A1, 0xF1A6, 0x220D, 0x220E]:
+            return data  # Already ASCII
+
+        # 32-bit Unsigned Integer (Serial Number, Product Code)
+        elif did in [0xF18C, 0xF192]:
+            if len(data) >= 4:
+                value = int.from_bytes(data[:4], byteorder='big')
+                return str(value).encode('ascii')
+
+        # System Voltage (0.1V resolution)
+        elif did == 0x220F:
+            if len(data) >= 2:
+                raw = int.from_bytes(data[:2], byteorder='big')
+                voltage = raw / 10.0
+                return f"{voltage:.1f}V".encode('ascii')
+
+        # Axle Angles (signed, 0.1 degree resolution)
+        elif did in [0x2210, 0x2211, 0x2212]:
+            if len(data) >= 2:
+                raw = int.from_bytes(data[:2], byteorder='big', signed=True)
+                angle = raw / 10.0
+                return f"{angle:.1f}°".encode('ascii')
+
+        # Axle Control Percentages (signed, 1% resolution)
+        elif did in [0x2213, 0x2214]:
+            if len(data) >= 2:
+                percentage = int.from_bytes(
+                    data[:2], byteorder='big', signed=True)
+                return f"{percentage}%".encode('ascii')
+
+        # Min/Max Axle Currents (signed, 1mA resolution)
+        elif did in [0x2215, 0x2216, 0x2217, 0x2218, 0x2219, 0x221A, 0x221B, 0x221C]:
+            if len(data) >= 2:
+                current = int.from_bytes(
+                    data[:2], byteorder='big', signed=True)
+                return f"{current}mA".encode('ascii')
+
+        # Default: return raw hex as string
+        return data.hex().encode('ascii')
 
     def write_data_by_identifier(self, did: int, data: bytes) -> bool:
         """Write Data By Identifier (0x2E) service"""
