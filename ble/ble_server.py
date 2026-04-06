@@ -109,7 +109,6 @@ class Characteristic(ServiceInterface):
         self.emit_properties_changed({
             'Value': Variant('ay', data)
         })
-        logger.info(f"📡 BLE notified: {data}")
 
 
 class Service(ServiceInterface):
