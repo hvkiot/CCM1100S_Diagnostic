@@ -21,6 +21,7 @@ class Characteristic(ServiceInterface):
         self.path = f"{service_path}/char0"
         self.uuid = uuid
         self.flags = flags
+        self.value = b''
         self.service_path = service_path
         self.command_handler = command_handler
         self.notifying = False
@@ -39,7 +40,7 @@ class Characteristic(ServiceInterface):
 
     @method()
     def ReadValue(self, options: 'a{sv}') -> 'ay':
-        return list(b'READY')
+        return self.value
 
     @method()
     async def WriteValue(self, value: 'ay', options: 'a{sv}'):
@@ -96,10 +97,12 @@ class Characteristic(ServiceInterface):
         if not self.notifying:
             logger.warning("Notifications not enabled")
             return
+        self.value = data
 
         self.emit_properties_changed({
             'Value': Variant('ay', data)
         })
+        logger.info(f"📡 BLE notified: {data}")
 
 
 class Service(ServiceInterface):
