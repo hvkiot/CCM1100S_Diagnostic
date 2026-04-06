@@ -56,9 +56,11 @@ class UDSClient:
         )
 
     def _receive_can_frame(self, timeout: float = 1.0):
-        """Receive CAN frame via CAN manager"""
+        """Receive CAN frame"""
         msg = self.can_manager.receive_message(timeout)
-        return msg.data if msg else None
+        if msg and msg.arbitration_id == self.can_manager.config.rx_id:
+            return msg.data
+        return None
 
     def diagnostic_session_control(self, session_type: UDSSessionType) -> bool:
         """Switch diagnostic session"""

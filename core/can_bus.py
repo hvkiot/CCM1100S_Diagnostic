@@ -63,24 +63,15 @@ class CANBusManager:
             return False
 
     def receive_message(self, timeout: float = 1.0) -> Optional[can.Message]:
-        """Receive CAN message - only accept messages from ECU's RX ID"""
+        """Receive CAN message - accept any ID for debugging"""
         if not self._is_connected or not self.bus:
             return None
 
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            try:
-                msg = self.bus.recv(0.01)
-                if msg:
-                    # Only accept messages from the ECU's response ID
-                    if msg.arbitration_id == self.config.rx_id:
-                        logger.debug(
-                            f"RX: {hex(msg.arbitration_id)} {msg.data.hex()}")
-                        return msg
-                    else:
-                        logger.debug(
-                            f"Ignoring other ID: {hex(msg.arbitration_id)}")
-            except Exception as e:
-                pass
-
+        try:
+            msg = self.bus.recv(timeout)
+            if msg:
+                logger.debug(f"RX: {hex(msg.arbitration_id)} {msg.data.hex()}")
+                return msg  # Don't filter by ID
+        except Exception as e:
+            pass
         return None

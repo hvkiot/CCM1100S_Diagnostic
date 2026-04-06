@@ -1,164 +1,125 @@
-# /core/iso_tp.pyimport time
+import time
 import logging
 from typing import Optional
-import time
 
 logger = logging.getLogger(__name__)
 
 
 class ISOTPHandler:
-    """ISO-TP (ISO 15765-2) protocol handler - CORRECTED VERSION"""
+    """ISO-TP (ISO 15765-2) protocol handler - FIXED for multi-frame"""
 
     def __init__(self, can_sender, can_receiver):
         self.send_frame = can_sender
         self.recv_frame = can_receiver
 
-    def _send_single_frame(self, payload: bytes) -> None:
-        """Send Single Frame (SF) - PCI byte = 0x0N where N is length"""
-        length = len(payload)
-        # PCI byte: bits 7-4 = 0 (SF type), bits 3-0 = length
-        # For UDS, the length includes the UDS service byte
-        pci_byte = length & 0x0F
-        frame = bytearray([pci_byte]) + payload
-        # Pad to 8 bytes exactly
-        while len(frame) < 8:
-            frame.append(0x00)
-        self.send_frame(bytes(frame))
-        logger.info(f"TX SF: {frame.hex()}")  # Change to INFO to see in logs
+    def send(self, payload: bytes, timeout: float = 2.0) -> Optional[bytes]:
+        """Send UDS request and receive response"""
+        # Send request
+        if not self._send_request(payload):
+            return None
 
-    def _send_multi_frame(self, payload: bytes) -> bool:
-        """Send multi-frame message (FF + CF)"""
+        # Receive response
+        return self._receive_response(timeout)
+
+    def _send_request(self, payload: bytes) -> bool:
+        """Send UDS request"""
         length = len(payload)
 
-        # First Frame (FF) - PCI bytes: 0x10 + high nibble of length, then low byte
-        ff_pci_byte1 = 0x10 | ((length >> 8) & 0x0F)
-        ff_pci_byte2 = length & 0xFF
-        frame = bytearray([ff_pci_byte1, ff_pci_byte2]) + payload[:6]
-        while len(frame) < 8:
-            frame.append(0x00)
-        self.send_frame(bytes(frame))
-        logger.debug(f"TX FF: {frame.hex()}")
+        # Single Frame (SF)
+        if length <= 7:
+            data = bytearray([length]) + payload
+            while len(data) < 8:
+                data.append(0x00)
+            self.send_frame(bytes(data))
+            return True
 
-        # Wait for Flow Control (FC) from ECU
-        fc_data = self.recv_frame(1.0)
-        if not fc_data:
+        # Multi-frame (FF + CF)
+        first_len = min(6, length)
+
+        # First Frame (FF)
+        ff = bytearray([
+            0x10 | ((length >> 8) & 0x0F),
+            length & 0xFF
+        ]) + payload[:first_len]
+        while len(ff) < 8:
+            ff.append(0x00)
+        self.send_frame(bytes(ff))
+
+        # Wait for Flow Control
+        fc = self.recv_frame(0.5)
+        if not fc or ((fc[0] >> 4) & 0x0F) != 3:
             logger.error("No Flow Control received")
             return False
 
-        fc_data = fc_data if isinstance(fc_data, bytes) else bytes(fc_data)
-        fc_pci = (fc_data[0] >> 4) & 0x0F
-
-        if fc_pci != 3:
-            logger.error(f"Expected Flow Control (PCI=3), got {fc_pci}")
-            return False
-
-        # Parse FC parameters
-        block_size = fc_data[1]
-        st_min = fc_data[2]
-
-        # Send Consecutive Frames (CF)
-        seq_num = 1
-        idx = 6  # Already sent first 6 bytes in FF
+        # Send Consecutive Frames
+        seq = 1
+        idx = first_len
 
         while idx < length:
-            # CF PCI byte: 0x20 + sequence number
-            pci_byte = 0x20 | (seq_num & 0x0F)
             chunk = payload[idx:idx+7]
-            frame = bytearray([pci_byte]) + chunk
-            while len(frame) < 8:
-                frame.append(0x00)
-            self.send_frame(bytes(frame))
-            logger.debug(f"TX CF (seq={seq_num}): {frame.hex()}")
-
+            cf = bytearray([0x20 | (seq & 0x0F)]) + chunk
+            while len(cf) < 8:
+                cf.append(0x00)
+            self.send_frame(bytes(cf))
             idx += 7
-            seq_num = (seq_num + 1) & 0x0F
-
-            # Apply Separation Time (STmin)
-            if st_min < 0x80:
-                time.sleep(st_min / 1000.0)
-            elif st_min >= 0xF1 and st_min <= 0xF9:
-                time.sleep((st_min - 0xF0) / 10000.0)
-
-            # Check block size limit
-            if block_size > 0 and (seq_num - 1) % block_size == 0 and idx < length:
-                # Wait for next FC
-                fc_data = self.recv_frame(1.0)
-                if not fc_data:
-                    logger.error("Timeout waiting for next FC")
-                    return False
-                fc_data = fc_data if isinstance(
-                    fc_data, bytes) else bytes(fc_data)
-                # Continue sending
+            seq = (seq + 1) & 0x0F
+            time.sleep(0.01)
 
         return True
 
-    def send(self, payload: bytes, timeout: float = 5.0) -> Optional[bytes]:
-        """Send UDS request and receive response"""
-        length = len(payload)
-
-        # Send request
-        if length <= 7:
-            self._send_single_frame(payload)
-        else:
-            if not self._send_multi_frame(payload):
-                return None
-
-        # Receive response - longer timeout for multi-frame
-        return self._receive_response(timeout)
-
-    def _receive_response(self, timeout: float = 5.0) -> Optional[bytes]:
-        """Receive and parse UDS response - increased timeout for security"""
+    def _receive_response(self, timeout: float = 3.0) -> Optional[bytes]:
+        """Receive and parse UDS response - handles multi-frame"""
         start = time.time()
 
         while time.time() - start < timeout:
-            msg = self.recv_frame(0.1)
-            if msg is None:
+            data = self.recv_frame(0.1)
+            if data is None:
                 continue
 
-            data = msg if isinstance(msg, bytes) else bytes(msg)
-            logger.info(f"RX raw: {data.hex()}")
+            # Convert to bytes if needed
+            raw = bytes(data) if not isinstance(data, bytes) else data
+            logger.debug(f"RX raw: {raw.hex()}")
 
-            pci_type = (data[0] >> 4) & 0x0F
+            pci_type = (raw[0] >> 4) & 0x0F
 
-            # Single Frame
+            # Single Frame (SF)
             if pci_type == 0:
-                length = data[0] & 0x0F
-                response = data[1:1+length]
-                logger.info(f"RX SF response: {response.hex()}")
+                length = raw[0] & 0x0F
+                response = raw[1:1+length]
+                logger.debug(f"RX SF: {response.hex()}")
                 return bytes(response)
 
-            # First Frame (FF) - multi-frame response
+            # First Frame (FF) - Multi-frame
             elif pci_type == 1:
-                total_len = ((data[0] & 0x0F) << 8) | data[1]
-                response = bytearray(data[2:8])
+                total_len = ((raw[0] & 0x0F) << 8) | raw[1]
+                response = bytearray(raw[2:8])  # First 6 bytes
                 logger.info(
                     f"RX FF: total_len={total_len}, first={response.hex()}")
 
                 # Send Flow Control
-                fc = bytes([0x30, 0x0A, 0x00, 0, 0, 0, 0, 0])
+                fc = bytes([0x30, 0x00, 0x00, 0, 0, 0, 0, 0])
                 self.send_frame(fc)
-                logger.info(f"TX FC: {fc.hex()}")
+                logger.debug(f"TX FC: {fc.hex()}")
 
-                # Receive consecutive frames with longer timeout
-                cf_timeout = time.time() + 5.0
+                # Receive Consecutive Frames
+                cf_timeout = time.time() + 2.0
                 expected_seq = 1
 
                 while len(response) < total_len and time.time() < cf_timeout:
-                    cf_msg = self.recv_frame(0.5)
-                    if cf_msg is None:
+                    cf_raw = self.recv_frame(0.5)
+                    if cf_raw is None:
                         continue
 
-                    cf_data = cf_msg if isinstance(
-                        cf_msg, bytes) else bytes(cf_msg)
+                    cf_data = bytes(cf_raw) if not isinstance(
+                        cf_raw, bytes) else cf_raw
                     cf_pci = (cf_data[0] >> 4) & 0x0F
 
-                    if cf_pci == 2:
-                        seq_num = cf_data[0] & 0x0F
+                    if cf_pci == 2:  # Consecutive Frame
                         response.extend(cf_data[1:8])
                         expected_seq = (expected_seq + 1) & 0x0F
-                        cf_timeout = time.time() + 5.0
-                        logger.info(
-                            f"RX CF (seq={seq_num}): total={len(response)}/{total_len}")
+                        cf_timeout = time.time() + 2.0
+                        logger.debug(
+                            f"RX CF: total={len(response)}/{total_len}")
                     else:
                         logger.warning(f"Unexpected PCI: {cf_pci}")
                         continue
@@ -172,4 +133,9 @@ class ISOTPHandler:
                         f"Incomplete: got {len(response)} of {total_len}")
                     return None
 
+            else:
+                logger.warning(f"Unknown PCI type: {pci_type}")
+                continue
+
+        logger.error("Timeout waiting for response")
         return None

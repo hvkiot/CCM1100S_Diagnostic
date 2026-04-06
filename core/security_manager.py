@@ -1,6 +1,6 @@
 # /core/security_manager.py
 from Crypto.Cipher import AES
-from typing import Optional
+import time
 from config.settings import SecurityConfig
 from utils.logger import get_logger
 
@@ -27,6 +27,8 @@ class SecurityManager:
     def do_security_access(self, uds_client, level: int = 0x03) -> bool:
         """Perform security access sequence - try level 0x03"""
         logger.info("Starting security access...")
+
+        time.sleep(0.2)
 
         # Try multiple levels
         for test_level in [0x03, 0x05, 0x07, 0x09, 0x01]:
