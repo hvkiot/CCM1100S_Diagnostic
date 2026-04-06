@@ -155,12 +155,12 @@ class UDSClient:
 
     def write_data_by_identifier(self, did: int, data: bytes) -> bool:
         """Write Data By Identifier (0x2E) service"""
-        if not self._is_authenticated:
-            logger.warning("Security access required for write operation")
-            time.sleep(0.1)
-            if not self.security_manager.do_security_access(self):
-                return False
-            self._is_authenticated = True
+        logger.info(
+            "Ensuring ECU is in Extended Session and unlocked before Write...")
+
+        if not self.security_manager.do_security_access(self):
+            logger.error("Failed to secure ECU for Write operation.")
+            return False
 
         payload = bytes([0x2E, (did >> 8) & 0xFF, did & 0xFF]) + data
         response = self.iso_tp.send(payload)
@@ -169,10 +169,11 @@ class UDSClient:
             logger.info(f"Write DID 0x{did:04X} success")
             return True
         elif response and response[0] == 0x7F:
-            nrc = response[2]
+            nrc = response[2] if len(response) > 2 else 0x00
             logger.error(f"Write DID failed: NRC 0x{nrc:02X}")
             return False
 
+        logger.error("Write DID failed: No valid response from ECU")
         return False
 
     def routine_control(self, routine_id: int, subfunction: int, data: bytes = b'') -> Optional[bytes]:
