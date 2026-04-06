@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 class ISOTPHandler:
-    """ISO-TP (ISO 15765-2) protocol handler - FIXED for multi-frame"""
+    """ISO-TP (ISO 15765-2) protocol handler - Bulletproof Edition"""
 
     def __init__(self, can_sender, can_receiver):
         self.send_frame = can_sender
@@ -15,7 +15,10 @@ class ISOTPHandler:
     def send(self, payload: bytes, timeout: float = 2.0) -> Optional[bytes]:
         """Send UDS request and receive response"""
 
-        logger.debug("Flushing CAN buffer before sending...")
+        # ---------------------------------------------------------
+        # 1. FLUSH THE BUFFER
+        # Destroys any "ghost" frames left over from previous timeouts
+        # ---------------------------------------------------------
         while self.recv_frame(0.05) is not None:
             pass
 
@@ -34,7 +37,7 @@ class ISOTPHandler:
         if length <= 7:
             data = bytearray([length]) + payload
             while len(data) < 8:
-                data.append(0x00)  # OR 0xAA for padding
+                data.append(0x00)
             self.send_frame(bytes(data))
             return True
 
@@ -53,8 +56,12 @@ class ISOTPHandler:
         logger.debug(f"TX FF: {ff.hex()}")
         self.send_frame(bytes(ff))
 
-        # Wait for Flow Control
-        fc_raw = self.recv_frame(1.0)  # Increased timeout to 1 second
+        # ---------------------------------------------------------
+        # 2. THE FIX: PATIENCE
+        # Wait up to 2.0 seconds for the ECU to finish its internal
+        # crypto calculations and send the Flow Control.
+        # ---------------------------------------------------------
+        fc_raw = self.recv_frame(2.0)
 
         if not fc_raw:
             logger.error("No Flow Control received (Timeout)")
@@ -67,14 +74,14 @@ class ISOTPHandler:
             logger.error(f"Invalid Flow Control received: {fc.hex()}")
             return False
 
-        # Extract STmin (Separation Time) from the Flow Control frame
+        # Extract STmin (Separation Time)
         stmin_raw = fc[2]
         if stmin_raw <= 0x7F:
-            stmin = stmin_raw / 1000.0  # milliseconds -> seconds
+            stmin = stmin_raw / 1000.0
         elif 0xF1 <= stmin_raw <= 0xF9:
-            stmin = (stmin_raw - 0xF0) / 10000.0  # microseconds -> seconds
+            stmin = (stmin_raw - 0xF0) / 10000.0
         else:
-            stmin = 0.01  # Default safe fallback
+            stmin = 0.01
 
         logger.debug(f"Using STmin: {stmin}s")
 
@@ -91,16 +98,15 @@ class ISOTPHandler:
 
             self.send_frame(bytes(cf))
 
-            idx += len(chunk)
+            idx += 7
             seq = (seq + 1) & 0x0F
 
-            # CRITICAL: Respect ECU timing between consecutive frames
             time.sleep(stmin)
 
         return True
 
     def _receive_response(self, timeout: float = 3.0) -> Optional[bytes]:
-        """Receive and parse UDS response - handles multi-frame"""
+        """Receive and parse UDS response"""
         start = time.time()
 
         while time.time() - start < timeout:
@@ -108,30 +114,22 @@ class ISOTPHandler:
             if data is None:
                 continue
 
-            # Convert to bytes if needed
             raw = bytes(data) if not isinstance(data, bytes) else data
-            logger.debug(f"RX raw: {raw.hex()}")
-
             pci_type = (raw[0] >> 4) & 0x0F
 
             # Single Frame (SF)
             if pci_type == 0:
                 length = raw[0] & 0x0F
-                response = raw[1:1+length]
-                logger.debug(f"RX SF: {response.hex()}")
-                return bytes(response)
+                return bytes(raw[1:1+length])
 
-            # First Frame (FF) - Multi-frame
+            # First Frame (FF)
             elif pci_type == 1:
                 total_len = ((raw[0] & 0x0F) << 8) | raw[1]
-                response = bytearray(raw[2:8])  # First 6 bytes
-                logger.info(
-                    f"RX FF: total_len={total_len}, first={response.hex()}")
+                response = bytearray(raw[2:8])
 
                 # Send Flow Control
                 fc = bytes([0x30, 0x00, 0x00, 0, 0, 0, 0, 0])
                 self.send_frame(fc)
-                logger.debug(f"TX FC: {fc.hex()}")
 
                 # Receive Consecutive Frames
                 cf_timeout = time.time() + 2.0
@@ -150,23 +148,17 @@ class ISOTPHandler:
                         response.extend(cf_data[1:8])
                         expected_seq = (expected_seq + 1) & 0x0F
                         cf_timeout = time.time() + 2.0
-                        logger.debug(
-                            f"RX CF: total={len(response)}/{total_len}")
                     else:
-                        logger.warning(f"Unexpected PCI: {cf_pci}")
+                        logger.warning(f"Unknown PCI type: {cf_pci}")
                         continue
 
                 if len(response) >= total_len:
-                    result = bytes(response[:total_len])
-                    logger.info(f"RX complete: {result.hex()}")
-                    return result
+                    return bytes(response[:total_len])
                 else:
                     logger.error(
                         f"Incomplete: got {len(response)} of {total_len}")
                     return None
-
             else:
-                logger.warning(f"Unknown PCI type: {pci_type}")
                 continue
 
         logger.error("Timeout waiting for response")
