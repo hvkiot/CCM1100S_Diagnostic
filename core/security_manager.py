@@ -2,7 +2,6 @@
 from Crypto.Cipher import AES
 import time
 from config.settings import SecurityConfig
-from core.uds_client import UDSSessionType
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -28,6 +27,8 @@ class SecurityManager:
     def do_security_access(self, uds_client, level: int = 0x01) -> bool:
         """Perform security access sequence"""
         logger.info("Starting security access...")
+
+        from core.uds_client import UDSSessionType
 
         # 1. Force the session ONCE, just like check.py
         logger.info("Forcing Extended Session (0x10 0x03)...")
