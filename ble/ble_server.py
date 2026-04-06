@@ -69,6 +69,13 @@ class Characteristic(ServiceInterface):
             # Another small delay before sending notification
             await asyncio.sleep(0.05)
 
+            command_type = message.get('command')
+
+            if command_type == 'security_access':
+                logger.info(
+                    f"Security access result: {response.get('message')}")
+                return  # Don't send to app
+
             if self.notifying:
                 response_json = json.dumps(response)
                 # Send as bytes, NOT list

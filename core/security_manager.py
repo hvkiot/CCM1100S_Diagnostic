@@ -21,7 +21,6 @@ class SecurityManager:
 
         cipher = AES.new(self.config.secret_key, AES.MODE_ECB)
         key = cipher.encrypt(seed)
-        logger.debug(f"Calculated key: {key.hex()}")
         return key
 
     def do_security_access(self, uds_client, level: int = 0x01) -> bool:
@@ -30,42 +29,35 @@ class SecurityManager:
 
         from core.uds_client import UDSSessionType
 
-        # 1. Force the session ONCE, just like check.py
+        # 1. Force the Extended Session ONCE
         logger.info("Forcing Extended Session (0x10 0x03)...")
         if not uds_client.diagnostic_session_control(UDSSessionType.EXTENDED):
-            logger.error(
-                "Failed to enter Extended Session. Security will likely fail.")
+            logger.error("Failed to enter Extended Session.")
 
-        # Give the ECU time to settle after the session switch
         time.sleep(0.5)
 
-        # Try multiple attempts with increasing delays
-        for attempt in range(3):  # Reduced to 3 attempts to avoid long lockouts
+        for attempt in range(3):
             logger.info(f"Requesting seed (attempt {attempt+1})...")
 
-            # Step 1: Request seed
             seed_response = uds_client.raw_request(bytes([0x27, level]))
 
-            # Check if response is valid (0x67 is positive response for 0x27)
             if seed_response and seed_response[0] == 0x67:
                 seed = seed_response[2:]
 
                 # ----------------------------------------------------
-                # 🛑 THE MISSING UDS STANDARD CHECK 🛑
-                # If seed is all zeros, the ECU is already unlocked.
+                # 🛑 THE ZERO-SEED TRAP FIX 🛑
+                # For this ECU, a zero-seed means Security Timer Lockout.
                 # ----------------------------------------------------
                 if all(b == 0 for b in seed):
-                    self._is_unlocked = True
-                    logger.info(
-                        "✅ ECU is ALREADY unlocked (Seed is all zeros)")
-                    return True
+                    logger.error(
+                        "❌ ECU returned all-zeros seed! Security Penalty Timer is active.")
+                    logger.error(
+                        "You MUST power-cycle the ECU (turn it off and on) to try again.")
+                    return False
 
-                logger.info(f"✅ Got valid seed: {seed.hex()}")
+                logger.info(f"✅ Got valid REAL seed: {seed.hex()}")
 
-                # Calculate and send key
                 key = self.calculate_key(seed)
-
-                # Small delay before sending key (STmin compliance)
                 time.sleep(0.05)
 
                 verify_response = uds_client.raw_request(
@@ -79,16 +71,14 @@ class SecurityManager:
                     nrc = verify_response[2] if verify_response and len(
                         verify_response) > 2 else 0x00
                     logger.warning(f"Key rejected: NRC 0x{nrc:02X}")
-                    return False  # If key is rejected, retry loop is usually locked out by ECU anyway
+                    return False
             else:
                 nrc = seed_response[2] if seed_response and len(
                     seed_response) > 2 else 0x00
                 logger.warning(f"Attempt {attempt+1} failed: NRC 0x{nrc:02X}")
 
-            # Increase delay between attempts if seed failed
             time.sleep(1.0)
 
-        logger.error("All security attempts failed")
         return False
 
     @property
