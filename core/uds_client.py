@@ -112,6 +112,8 @@ class UDSClient:
         # ASCII Strings (return as-is)
         if did in [0xF190, 0xF191, 0xF187, 0xF188, 0xF1A0, 0xF1A1, 0xF1A6, 0x220D, 0x220E]:
             return data  # Already ASCII
+        elif all(b == 0 for b in data):
+            return "Not Programmed".encode('utf-8')
 
         # 32-bit Unsigned Integer (Serial Number, Product Code)
         elif did in [0xF18C, 0xF192]:
