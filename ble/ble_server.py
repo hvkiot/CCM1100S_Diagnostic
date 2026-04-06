@@ -97,11 +97,10 @@ class Characteristic(ServiceInterface):
             logger.warning("Notifications not enabled")
             return
 
-        # 🔥 Update characteristic value
         self.emit_properties_changed(
             'org.bluez.GattCharacteristic1',
             {
-                'Value': Variant('ay', list(data))
+                'Value': Variant('ay', data)
             },
             []
         )
