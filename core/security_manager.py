@@ -24,58 +24,63 @@ class SecurityManager:
         logger.debug(f"Calculated key: {key.hex()}")
         return key
 
-    def do_security_access(self, uds_client, level: int = 0x03) -> bool:
-        """Perform security access sequence - try level 0x03"""
+    def do_security_access(self, uds_client, level: int = 0x01) -> bool:
+        """Perform security access sequence"""
         logger.info("Starting security access...")
 
-        time.sleep(0.2)
+        # Critical: Wait for ECU to be ready
+        time.sleep(0.3)
 
-        # Try multiple levels
-        for test_level in [0x03, 0x05, 0x07, 0x09, 0x01]:
-            logger.info(f"Trying security level 0x{test_level:02X}")
+        # Step 1: Request seed
+        logger.info("Requesting seed...")
+        seed_response = uds_client.raw_request(bytes([0x27, level]))
 
-            # Step 1: Request seed
-            seed_response = uds_client.raw_request(bytes([0x27, test_level]))
+        if not seed_response:
+            logger.error("No response to seed request")
+            return False
 
-            if not seed_response:
-                logger.warning(f"No response for level 0x{test_level:02X}")
-                continue
+        # Check if we got a multi-frame response (0x10) or positive response (0x67)
+        if seed_response[0] == 0x10:
+            # This is a First Frame - we need to extract the actual response
+            # The ISO-TP layer should have already reassembled it
+            logger.error(
+                f"Got multi-frame header instead of response: {seed_response.hex()}")
+            return False
 
-            # Check for positive response (0x67)
-            if seed_response[0] == 0x67:
-                seed = seed_response[2:]
-                logger.info(
-                    f"✅ Got seed for level 0x{test_level:02X}: {seed.hex()}")
+        if seed_response[0] != 0x67:
+            nrc = seed_response[2] if len(seed_response) > 2 else 0x00
+            logger.error(
+                f"Failed to get seed. Response: {seed_response.hex()}, NRC: 0x{nrc:02X}")
+            return False
 
-                # Step 2: Calculate key
-                try:
-                    key = self.calculate_key(seed)
-                    logger.info(f"Calculated key: {key.hex()}")
-                except Exception as e:
-                    logger.error(f"Key calculation failed: {e}")
-                    continue
+        seed = seed_response[2:]
+        logger.info(f"Received seed ({len(seed)} bytes): {seed.hex()}")
 
-                # Step 3: Send key
-                verify_response = uds_client.raw_request(
-                    bytes([0x27, test_level + 1]) + key)
+        # Wait before sending key
+        time.sleep(0.1)
 
-                if verify_response and verify_response[0] == 0x67:
-                    self._is_unlocked = True
-                    logger.info(
-                        f"✅ Security access granted at level 0x{test_level:02X}!")
-                    return True
-                else:
-                    nrc = verify_response[2] if verify_response and len(
-                        verify_response) > 2 else 0x00
-                    logger.warning(
-                        f"Key rejected for level 0x{test_level:02X}, NRC: 0x{nrc:02X}")
-            else:
-                nrc = seed_response[2] if len(seed_response) > 2 else 0x00
-                logger.warning(
-                    f"Seed request failed for level 0x{test_level:02X}: NRC 0x{nrc:02X}")
+        # Step 2: Calculate key
+        try:
+            key = self.calculate_key(seed)
+            logger.info(f"Calculated key: {key.hex()}")
+        except Exception as e:
+            logger.error(f"Key calculation failed: {e}")
+            return False
 
-        logger.error("All security levels failed")
-        return False
+        # Step 3: Send key
+        logger.info("Sending key...")
+        verify_response = uds_client.raw_request(
+            bytes([0x27, level + 1]) + key)
+
+        if verify_response and verify_response[0] == 0x67:
+            self._is_unlocked = True
+            logger.info("✅ Security access granted!")
+            return True
+        else:
+            nrc = verify_response[2] if verify_response and len(
+                verify_response) > 2 else 0x00
+            logger.error(f"Security access denied. NRC: 0x{nrc:02X}")
+            return False
 
     @property
     def is_unlocked(self) -> bool:

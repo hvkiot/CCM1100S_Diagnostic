@@ -1,6 +1,7 @@
 # /core/uds_client.py
-from typing import Optional, Dict, Any
+from typing import Optional
 from enum import Enum
+import time
 from core.can_bus import CANBusManager
 from core.iso_tp import ISOTPHandler
 from core.security_manager import SecurityManager
@@ -107,6 +108,7 @@ class UDSClient:
         """Write Data By Identifier (0x2E) service"""
         if not self._is_authenticated:
             logger.warning("Security access required for write operation")
+            time.sleep(0.1)
             if not self.security_manager.do_security_access(self):
                 return False
             self._is_authenticated = True
