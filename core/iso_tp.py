@@ -14,6 +14,11 @@ class ISOTPHandler:
 
     def send(self, payload: bytes, timeout: float = 2.0) -> Optional[bytes]:
         """Send UDS request and receive response"""
+
+        logger.debug("Flushing CAN buffer before sending...")
+        while self.recv_frame(0.05) is not None:
+            pass
+
         # Send request
         if not self._send_request(payload):
             return None
