@@ -28,60 +28,48 @@ class SecurityManager:
         """Perform security access sequence"""
         logger.info("Starting security access...")
 
-        # Send Tester Present to keep session alive
-        logger.info("Sending Tester Present...")
-        uds_client.raw_request(bytes([0x3E, 0x00]))
-        time.sleep(0.2)
+        # Send Tester Present multiple times to establish session
+        for _ in range(3):
+            uds_client.raw_request(bytes([0x3E, 0x00]))
+            time.sleep(0.1)
 
-        # Step 1: Request seed (may need retry)
-        for attempt in range(3):
+        # Wait longer for ECU to be ready
+        time.sleep(0.5)
+
+        # Try multiple attempts with increasing delays
+        for attempt in range(5):
             logger.info(f"Requesting seed (attempt {attempt+1})...")
             seed_response = uds_client.raw_request(bytes([0x27, level]))
 
-            if seed_response and seed_response[0] == 0x67:
-                break
+            if seed_response and len(seed_response) > 2:
+                # Check if we got a valid seed (non-zero)
+                seed = seed_response[2:]
+                if seed_response[0] == 0x67 and any(b != 0 for b in seed):
+                    logger.info(f"✅ Got valid seed: {seed.hex()}")
 
-            if seed_response and seed_response[0] == 0x7F:
-                nrc = seed_response[2] if len(seed_response) > 2 else 0x00
-                logger.warning(f"Attempt {attempt+1} failed: NRC 0x{nrc:02X}")
-                time.sleep(0.3)
-                continue
-            else:
-                logger.warning(
-                    f"Attempt {attempt+1} failed: no valid response")
-                time.sleep(0.3)
-        else:
-            logger.error("All attempts to get seed failed")
-            return False
+                    # Calculate and send key
+                    key = self.calculate_key(seed)
+                    verify_response = uds_client.raw_request(
+                        bytes([0x27, level + 1]) + key)
 
-        seed = seed_response[2:]
-        logger.info(f"Received seed ({len(seed)} bytes): {seed.hex()}")
+                    if verify_response and verify_response[0] == 0x67:
+                        self._is_unlocked = True
+                        logger.info("✅ Security access granted!")
+                        return True
+                    else:
+                        nrc = verify_response[2] if len(
+                            verify_response) > 2 else 0x00
+                        logger.warning(f"Key rejected: NRC 0x{nrc:02X}")
+                else:
+                    nrc = seed_response[2] if len(seed_response) > 2 else 0x00
+                    logger.warning(
+                        f"Attempt {attempt+1} failed: NRC 0x{nrc:02X}, seed: {seed.hex()}")
 
-        # Wait before sending key
-        time.sleep(0.1)
+            # Increase delay between attempts
+            time.sleep(0.5 * (attempt + 1))
 
-        # Step 2: Calculate key
-        try:
-            key = self.calculate_key(seed)
-            logger.info(f"Calculated key: {key.hex()}")
-        except Exception as e:
-            logger.error(f"Key calculation failed: {e}")
-            return False
-
-        # Step 3: Send key
-        logger.info("Sending key...")
-        verify_response = uds_client.raw_request(
-            bytes([0x27, level + 1]) + key)
-
-        if verify_response and verify_response[0] == 0x67:
-            self._is_unlocked = True
-            logger.info("✅ Security access granted!")
-            return True
-        else:
-            nrc = verify_response[2] if verify_response and len(
-                verify_response) > 2 else 0x00
-            logger.error(f"Security access denied. NRC: 0x{nrc:02X}")
-            return False
+        logger.error("All security attempts failed")
+        return False
 
     @property
     def is_unlocked(self) -> bool:
