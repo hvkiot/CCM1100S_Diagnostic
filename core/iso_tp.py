@@ -25,15 +25,15 @@ class ISOTPHandler:
         """Send UDS request"""
         length = len(payload)
 
-        # Single Frame (SF)
+        # ---- Single Frame (SF) ----
         if length <= 7:
             data = bytearray([length]) + payload
             while len(data) < 8:
-                data.append(0x00)
+                data.append(0x00)  # OR 0xAA for padding
             self.send_frame(bytes(data))
             return True
 
-        # Multi-frame (FF + CF)
+        # ---- Multi-frame (FF + CF) ----
         first_len = min(6, length)
 
         # First Frame (FF)
@@ -41,15 +41,37 @@ class ISOTPHandler:
             0x10 | ((length >> 8) & 0x0F),
             length & 0xFF
         ]) + payload[:first_len]
+
         while len(ff) < 8:
             ff.append(0x00)
+
+        logger.debug(f"TX FF: {ff.hex()}")
         self.send_frame(bytes(ff))
 
         # Wait for Flow Control
-        fc = self.recv_frame(0.5)
-        if not fc or ((fc[0] >> 4) & 0x0F) != 3:
-            logger.error("No Flow Control received")
+        fc_raw = self.recv_frame(1.0)  # Increased timeout to 1 second
+
+        if not fc_raw:
+            logger.error("No Flow Control received (Timeout)")
             return False
+
+        fc = bytes(fc_raw) if not isinstance(fc_raw, bytes) else fc_raw
+        logger.debug(f"RX FC: {fc.hex()}")
+
+        if (fc[0] >> 4) != 3:
+            logger.error(f"Invalid Flow Control received: {fc.hex()}")
+            return False
+
+        # Extract STmin (Separation Time) from the Flow Control frame
+        stmin_raw = fc[2]
+        if stmin_raw <= 0x7F:
+            stmin = stmin_raw / 1000.0  # milliseconds -> seconds
+        elif 0xF1 <= stmin_raw <= 0xF9:
+            stmin = (stmin_raw - 0xF0) / 10000.0  # microseconds -> seconds
+        else:
+            stmin = 0.01  # Default safe fallback
+
+        logger.debug(f"Using STmin: {stmin}s")
 
         # Send Consecutive Frames
         seq = 1
@@ -58,12 +80,17 @@ class ISOTPHandler:
         while idx < length:
             chunk = payload[idx:idx+7]
             cf = bytearray([0x20 | (seq & 0x0F)]) + chunk
+
             while len(cf) < 8:
                 cf.append(0x00)
+
             self.send_frame(bytes(cf))
-            idx += 7
+
+            idx += len(chunk)
             seq = (seq + 1) & 0x0F
-            time.sleep(0.01)
+
+            # CRITICAL: Respect ECU timing between consecutive frames
+            time.sleep(stmin)
 
         return True
 
