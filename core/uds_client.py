@@ -89,9 +89,10 @@ class UDSClient:
         response = self.iso_tp.send(payload)
 
         if response and len(response) > 0 and response[0] == 0x62:
-            raw_data = response[1:]
+            # Skip 0x62 (1 byte) + DID (2 bytes) = 3 bytes total
+            raw_data = response[3:]
             logger.info(
-                f"Read DID 0x{did:04X} success, raw data: {raw_data.hex()}")
+                f"Read DID 0x{did:04X} success, pure data: {raw_data.hex()}")
 
             # Scale the data based on DID
             scaled_data = self._scale_did_data(did, raw_data)
