@@ -48,75 +48,49 @@ class ISOTPHandler:
         while len(ff) < 8:
             ff.append(0x00)
 
-        logger.debug(f"TX FF: {ff.hex()}")
+        logger.info(f"✅ Sent First Frame: {ff.hex()}")
         self.send_frame(bytes(ff))
-        logger.info(f"✅ Sent First Frame: {bytes(ff).hex()}")
 
-        logger.info(f"Sent First Frame, waiting for Flow Control from ECU...")
-
-        start_wait = time.time()
-        while time.time() - start_wait < 1.0:
-            any_frame = self.recv_frame(0.05)
-            if any_frame:
-                logger.error(
-                    f"⚠️ Received unexpected frame while waiting for FC: {any_frame.hex()}")
-                # Don't break - continue to see if FC arrives
-
-        # Wait for Flow Control or Immediate Response
+        # Wait for Flow Control
         fc_raw = self.recv_frame(1.0)
         if not fc_raw:
             logger.error("No Flow Control received (Timeout)")
-            logger.error("ECU did not respond within 1 second")
             return False
 
         fc = bytes(fc_raw) if not isinstance(fc_raw, bytes) else fc_raw
-        logger.debug(f"RX FC: {fc.hex()}")
+        logger.info(f"✅ Received Flow Control: {fc.hex()}")
 
-        pci_type = (fc[0] >> 4) & 0x0F
-
-        # 🔥 NEW: Handle Single Frame Response (Negative Response)
-        if pci_type == 0:
-            length = fc[0] & 0x0F
-            response = bytes(fc[1:1+length])
-            logger.error(
-                f"ECU rejected request with immediate response: {response.hex()}")
-            # This is a negative response (7F XX XX) - let _receive_response handle it
+        if (fc[0] >> 4) != 3:
+            logger.error(f"Invalid Flow Control received: {fc.hex()}")
             return False
 
-        # Handle Flow Control (Expected)
-        elif pci_type == 3:
-            stmin_raw = fc[2]
-            if stmin_raw <= 0x7F:
-                stmin = stmin_raw / 1000.0
-            elif 0xF1 <= stmin_raw <= 0xF9:
-                stmin = (stmin_raw - 0xF0) / 10000.0
-            else:
-                stmin = 0.01
-
-            logger.debug(f"Using STmin: {stmin}s")
-
-            # Send Consecutive Frames
-            seq = 1
-            idx = first_len
-
-            while idx < length:
-                chunk = payload[idx:idx+7]
-                cf = bytearray([0x20 | (seq & 0x0F)]) + chunk
-
-                while len(cf) < 8:
-                    cf.append(0x00)
-
-                self.send_frame(bytes(cf))
-                idx += 7
-                seq = (seq + 1) & 0x0F
-                time.sleep(stmin)
-
-            return True
-
+        stmin_raw = fc[2]
+        if stmin_raw <= 0x7F:
+            stmin = stmin_raw / 1000.0
+        elif 0xF1 <= stmin_raw <= 0xF9:
+            stmin = (stmin_raw - 0xF0) / 10000.0
         else:
-            logger.error(
-                f"Unexpected PCI type {pci_type} received: {fc.hex()}")
-            return False
+            stmin = 0.01
+
+        logger.debug(f"Using STmin: {stmin}s")
+
+        # Send Consecutive Frames
+        seq = 1
+        idx = first_len
+
+        while idx < length:
+            chunk = payload[idx:idx+7]
+            cf = bytearray([0x20 | (seq & 0x0F)]) + chunk
+
+            while len(cf) < 8:
+                cf.append(0x00)
+
+            self.send_frame(bytes(cf))
+            idx += 7
+            seq = (seq + 1) & 0x0F
+            time.sleep(stmin)
+
+        return True
 
     def _receive_response(self, timeout: float = 2.0) -> Optional[bytes]:
         """Receive and parse UDS response (Strict Match to check.py)"""
