@@ -50,8 +50,17 @@ class ISOTPHandler:
 
         logger.debug(f"TX FF: {ff.hex()}")
         self.send_frame(bytes(ff))
+        logger.info(f"✅ Sent First Frame: {bytes(ff).hex()}")
 
         logger.info(f"Sent First Frame, waiting for Flow Control from ECU...")
+
+        start_wait = time.time()
+        while time.time() - start_wait < 1.0:
+            any_frame = self.recv_frame(0.05)
+            if any_frame:
+                logger.error(
+                    f"⚠️ Received unexpected frame while waiting for FC: {any_frame.hex()}")
+                # Don't break - continue to see if FC arrives
 
         # Wait for Flow Control or Immediate Response
         fc_raw = self.recv_frame(1.0)

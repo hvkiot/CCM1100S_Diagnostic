@@ -158,7 +158,7 @@ class UDSClient:
 
         logger.info(
             "Ensuring ECU is in Extended Session and unlocked before Write...")
-
+        time.sleep(0.1)
         if not self.security_manager.do_security_access(self):
             logger.error("Failed to secure ECU for Write operation.")
             return False
