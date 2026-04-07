@@ -17,17 +17,21 @@ class CANBusManager:
         self._is_connected = False
 
     def connect(self) -> bool:
-        """Establish CAN bus connection"""
         try:
             self.disconnect()
-
             self.bus = can.interface.Bus(
                 interface=self.config.interface,
                 channel=self.config.channel,
-                bitrate=self.config.bitrate
+                bitrate=self.config.bitrate,
+                can_filters=[{
+                    "can_id": self.config.rx_id,
+                    "can_mask": 0x1FFFFFFF,
+                    "extended": True
+                }]
             )
             self._is_connected = True
-            logger.info(f"CAN bus connected on {self.config.channel}")
+            logger.info(
+                f"CAN bus connected on {self.config.channel} with filter")
             return True
         except Exception as e:
             logger.error(f"Failed to connect CAN bus: {e}")
