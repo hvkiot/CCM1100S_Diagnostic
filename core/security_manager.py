@@ -42,6 +42,7 @@ class SecurityManager:
                     self._is_unlocked = True
                     logger.info(
                         "✅ ECU is ALREADY unlocked (Seed is all zeros)")
+                    time.sleep(0.3)
                     return True
 
                 logger.info(f"✅ Got valid REAL seed: {seed.hex()}")
