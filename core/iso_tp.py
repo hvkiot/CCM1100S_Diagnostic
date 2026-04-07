@@ -139,6 +139,7 @@ class ISOTPHandler:
 
                 if len(response) >= total_len:
                     result = bytes(response[:total_len])
+                    time.sleep(0.05)
                     return result
                 else:
                     logger.error(
