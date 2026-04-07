@@ -5,7 +5,7 @@ import time
 from core.can_bus import CANBusManager
 from core.iso_tp import ISOTPHandler
 from core.security_manager import SecurityManager
-from config.settings import CANConfig
+from config.settings import CANConfig, TimingConfig
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -164,7 +164,7 @@ class UDSClient:
 
         logger.info(
             "Security granted! Letting ECU flash memory unlock for 1 second...")
-        time.sleep(1.0)
+        time.sleep(TimingConfig.EEPROM_UNLOCK_DELAY)
 
         payload = bytes([0x2E, (did >> 8) & 0xFF, did & 0xFF]) + data
         response = self.iso_tp.send(payload)
