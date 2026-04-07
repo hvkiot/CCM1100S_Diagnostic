@@ -162,7 +162,8 @@ class UDSClient:
         if not self.security_manager.do_security_access(self):
             logger.error("Failed to secure ECU for Write operation.")
             return False
-
+        
+        time.sleep(0.05)
         # Send the Write command IMMEDIATELY (Maximum Speed!)
         payload = bytes([0x2E, (did >> 8) & 0xFF, did & 0xFF]) + data
         response = self.iso_tp.send(payload)
