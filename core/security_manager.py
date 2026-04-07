@@ -55,7 +55,7 @@ class SecurityManager:
                 logger.info(f"✅ Got valid REAL seed: {seed.hex()}")
 
                 key = self.calculate_key(seed)
-                time.sleep(TimingConfig.SECURITY_BUFFER_RESET_DELAY)
+                time.sleep(TimingConfig.AFTER_SEED_REQUEST_DELAY)
 
                 verify_response = uds_client.raw_request(
                     bytes([0x27, level + 1]) + key)

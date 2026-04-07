@@ -27,5 +27,6 @@ class SecurityConfig:
 
 
 class TimingConfig:
+    AFTER_SEED_REQUEST_DELAY = 0.05
     SECURITY_BUFFER_RESET_DELAY = 0.5  # Seconds
     EEPROM_UNLOCK_DELAY = 1.0          # Seconds
