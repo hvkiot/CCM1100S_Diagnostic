@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 class ISOTPHandler:
-    """ISO-TP (ISO 15765-2) protocol handler - Bulletproof Edition"""
+    """ISO-TP (ISO 15765-2) protocol handler - 100% check.py Match"""
 
     def __init__(self, can_sender, can_receiver):
         self.send_frame = can_sender
@@ -15,11 +15,10 @@ class ISOTPHandler:
     def send(self, payload: bytes, timeout: float = 2.0) -> Optional[bytes]:
         """Send UDS request and receive response"""
 
-        # ---------------------------------------------------------
-        # 1. FLUSH THE BUFFER
-        # Destroys any "ghost" frames left over from previous timeouts
-        # ---------------------------------------------------------
-        while self.recv_frame(0.05) is not None:
+        # 🛑 THE FIX: Non-Blocking Flush
+        # Using 0.0 instantly clears ghost frames without adding an
+        # artificial sleep delay that ruins the ECU's Security Timer!
+        while self.recv_frame(0.0) is not None:
             pass
 
         # Send request
@@ -33,7 +32,7 @@ class ISOTPHandler:
         """Send UDS request"""
         length = len(payload)
 
-        # ---- Single Frame (SF) ----
+        # Single Frame (SF)
         if length <= 7:
             data = bytearray([length]) + payload
             while len(data) < 8:
@@ -41,14 +40,10 @@ class ISOTPHandler:
             self.send_frame(bytes(data))
             return True
 
-        # ---- Multi-frame (FF + CF) ----
+        # Multi-frame (FF + CF)
         first_len = min(6, length)
-
-        # First Frame (FF)
-        ff = bytearray([
-            0x10 | ((length >> 8) & 0x0F),
-            length & 0xFF
-        ]) + payload[:first_len]
+        ff = bytearray([0x10 | ((length >> 8) & 0x0F),
+                       length & 0xFF]) + payload[:first_len]
 
         while len(ff) < 8:
             ff.append(0x00)
@@ -56,13 +51,8 @@ class ISOTPHandler:
         logger.debug(f"TX FF: {ff.hex()}")
         self.send_frame(bytes(ff))
 
-        # ---------------------------------------------------------
-        # 2. THE FIX: PATIENCE
-        # Wait up to 2.0 seconds for the ECU to finish its internal
-        # crypto calculations and send the Flow Control.
-        # ---------------------------------------------------------
-        fc_raw = self.recv_frame(2.0)
-
+        # Wait for Flow Control
+        fc_raw = self.recv_frame(1.0)
         if not fc_raw:
             logger.error("No Flow Control received (Timeout)")
             return False
@@ -74,7 +64,6 @@ class ISOTPHandler:
             logger.error(f"Invalid Flow Control received: {fc.hex()}")
             return False
 
-        # Extract STmin (Separation Time)
         stmin_raw = fc[2]
         if stmin_raw <= 0x7F:
             stmin = stmin_raw / 1000.0
@@ -97,16 +86,14 @@ class ISOTPHandler:
                 cf.append(0x00)
 
             self.send_frame(bytes(cf))
-
             idx += 7
             seq = (seq + 1) & 0x0F
-
             time.sleep(stmin)
 
         return True
 
-    def _receive_response(self, timeout: float = 3.0) -> Optional[bytes]:
-        """Receive and parse UDS response"""
+    def _receive_response(self, timeout: float = 2.0) -> Optional[bytes]:
+        """Receive and parse UDS response (Strict Match to check.py)"""
         start = time.time()
 
         while time.time() - start < timeout:
@@ -127,14 +114,13 @@ class ISOTPHandler:
                 total_len = ((raw[0] & 0x0F) << 8) | raw[1]
                 response = bytearray(raw[2:8])
 
-                # Send Flow Control
-                fc = bytes([0x30, 0x00, 0x00, 0, 0, 0, 0, 0])
+                # 🛑 CRITICAL: Send Flow Control IMMEDIATELY
+                # This explicitly matches check.py to keep the ECU happy.
+                fc = bytes([0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
                 self.send_frame(fc)
 
                 # Receive Consecutive Frames
-                cf_timeout = time.time() + 2.0
-                expected_seq = 1
-
+                cf_timeout = time.time() + 1.0
                 while len(response) < total_len and time.time() < cf_timeout:
                     cf_raw = self.recv_frame(0.5)
                     if cf_raw is None:
@@ -146,14 +132,14 @@ class ISOTPHandler:
 
                     if cf_pci == 2:  # Consecutive Frame
                         response.extend(cf_data[1:8])
-                        expected_seq = (expected_seq + 1) & 0x0F
-                        cf_timeout = time.time() + 2.0
+                        cf_timeout = time.time() + 1.0  # Reset timeout
                     else:
                         logger.warning(f"Unknown PCI type: {cf_pci}")
                         continue
 
                 if len(response) >= total_len:
-                    return bytes(response[:total_len])
+                    result = bytes(response[:total_len])
+                    return result
                 else:
                     logger.error(
                         f"Incomplete: got {len(response)} of {total_len}")
