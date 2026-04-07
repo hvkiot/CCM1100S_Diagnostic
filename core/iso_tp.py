@@ -53,7 +53,7 @@ class ISOTPHandler:
 
         # Wait for Flow Control
         fc_raw = self.recv_frame(1.0)
-        if not fc_raw:
+        if not fc_raw or (fc_raw[0] >> 4) != 3:
             logger.error("No Flow Control received (Timeout)")
             return False
 
