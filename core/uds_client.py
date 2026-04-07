@@ -155,17 +155,16 @@ class UDSClient:
 
     def write_data_by_identifier(self, did: int, data: bytes) -> bool:
         """Write Data By Identifier (0x2E) service"""
+
         logger.info(
             "Ensuring ECU is in Extended Session and unlocked before Write...")
 
+        # Force session and unlock
         if not self.security_manager.do_security_access(self):
             logger.error("Failed to secure ECU for Write operation.")
             return False
 
-        logger.info(
-            "Security granted! Letting ECU flash memory unlock for 1 second...")
-        time.sleep(TimingConfig.EEPROM_UNLOCK_DELAY)
-
+        # Send the payload IMMEDIATELY (No time.sleep!)
         payload = bytes([0x2E, (did >> 8) & 0xFF, did & 0xFF]) + data
         response = self.iso_tp.send(payload)
 

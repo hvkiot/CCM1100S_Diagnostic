@@ -29,13 +29,11 @@ class SecurityManager:
 
         from core.uds_client import UDSSessionType
 
-        # 1. Force the Extended Session ONCE
         logger.info("Forcing Extended Session (0x10 0x03)...")
         if not uds_client.diagnostic_session_control(UDSSessionType.EXTENDED):
             logger.error("Failed to enter Extended Session.")
 
-        time.sleep(TimingConfig.SECURITY_BUFFER_RESET_DELAY)
-
+        # Try multiple attempts
         for attempt in range(3):
             logger.info(f"Requesting seed (attempt {attempt+1})...")
 
@@ -44,8 +42,8 @@ class SecurityManager:
             if seed_response and seed_response[0] == 0x67:
                 seed = seed_response[2:]
 
+                # Check for Security Penalty Lockout (All zeros)
                 if all(b == 0 for b in seed):
-                    self._is_unlocked = True
                     logger.error(
                         "❌ ECU returned all-zeros seed! Security Penalty Timer is active.")
                     logger.error(
@@ -54,9 +52,8 @@ class SecurityManager:
 
                 logger.info(f"✅ Got valid REAL seed: {seed.hex()}")
 
+                # Calculate key and send IMMEDIATELY (No time.sleep!)
                 key = self.calculate_key(seed)
-                time.sleep(TimingConfig.AFTER_SEED_REQUEST_DELAY)
-
                 verify_response = uds_client.raw_request(
                     bytes([0x27, level + 1]) + key)
 
@@ -74,8 +71,10 @@ class SecurityManager:
                     seed_response) > 2 else 0x00
                 logger.warning(f"Attempt {attempt+1} failed: NRC 0x{nrc:02X}")
 
-            time.sleep(TimingConfig.EEPROM_UNLOCK_DELAY)
+            # Only sleep if we failed and need to retry
+            time.sleep(1.0)
 
+        logger.error("All security attempts failed")
         return False
 
     @property

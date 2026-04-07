@@ -24,9 +24,4 @@ class BLEConfig:
 class SecurityConfig:
     secret_key: bytes = b"TCHRMVHA2BPX3ULC"
     security_access_level: int = 0x01
-
-
-class TimingConfig:
-    AFTER_SEED_REQUEST_DELAY = 0.05
-    SECURITY_BUFFER_RESET_DELAY = 0.5  # Seconds
-    EEPROM_UNLOCK_DELAY = 1.0          # Seconds
+    
