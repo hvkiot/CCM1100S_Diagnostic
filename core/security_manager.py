@@ -15,44 +15,38 @@ class SecurityManager:
         self._is_unlocked = False
 
     def calculate_key(self, seed: bytes) -> bytes:
-        """Calculate key from seed using AES-ECB"""
         if len(seed) != 16:
             raise ValueError(f"Seed must be 16 bytes, got {len(seed)}")
-
         cipher = AES.new(self.config.secret_key, AES.MODE_ECB)
-        key = cipher.encrypt(seed)
-        return key
+        return cipher.encrypt(seed)
 
     def do_security_access(self, uds_client, level: int = 0x01) -> bool:
-        """Perform security access sequence"""
         logger.info("Starting security access...")
-
         from core.uds_client import UDSSessionType
 
         logger.info("Forcing Extended Session (0x10 0x03)...")
         if not uds_client.diagnostic_session_control(UDSSessionType.EXTENDED):
             logger.error("Failed to enter Extended Session.")
 
-        # Try multiple attempts
         for attempt in range(3):
             logger.info(f"Requesting seed (attempt {attempt+1})...")
-
             seed_response = uds_client.raw_request(bytes([0x27, level]))
 
             if seed_response and seed_response[0] == 0x67:
                 seed = seed_response[2:]
 
-                # Check for Security Penalty Lockout (All zeros)
+                # ----------------------------------------------------
+                # THE REAL TRUTH: All-Zeros means ALREADY UNLOCKED!
+                # ----------------------------------------------------
                 if all(b == 0 for b in seed):
-                    logger.error(
-                        "❌ ECU returned all-zeros seed! Security Penalty Timer is active.")
-                    logger.error(
-                        "You MUST power-cycle the ECU (turn it off and on) to try again.")
-                    return False
+                    self._is_unlocked = True
+                    logger.info(
+                        "✅ ECU is ALREADY unlocked (Seed is all zeros)")
+                    return True
 
                 logger.info(f"✅ Got valid REAL seed: {seed.hex()}")
 
-                # Calculate key and send IMMEDIATELY (No time.sleep!)
+                # Calculate key and send IMMEDIATELY (Maximum Speed!)
                 key = self.calculate_key(seed)
                 verify_response = uds_client.raw_request(
                     bytes([0x27, level + 1]) + key)
@@ -71,10 +65,9 @@ class SecurityManager:
                     seed_response) > 2 else 0x00
                 logger.warning(f"Attempt {attempt+1} failed: NRC 0x{nrc:02X}")
 
-            # Only sleep if we failed and need to retry
+            # Only delay if we failed and need to retry
             time.sleep(1.0)
 
-        logger.error("All security attempts failed")
         return False
 
     @property
