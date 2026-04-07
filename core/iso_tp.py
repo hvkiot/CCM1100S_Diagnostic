@@ -43,7 +43,7 @@ class ISOTPHandler:
         # Multi-frame (FF + CF)
         first_len = min(6, length)
         ff = bytearray([0x10 | ((length >> 8) & 0x0F),
-                       length & 0xFF]) + payload[:first_len]
+                        length & 0xFF]) + payload[:first_len]
 
         while len(ff) < 8:
             ff.append(0x00)
@@ -51,46 +51,60 @@ class ISOTPHandler:
         logger.debug(f"TX FF: {ff.hex()}")
         self.send_frame(bytes(ff))
 
-        # Wait for Flow Control
+        # Wait for Flow Control or Immediate Response
         fc_raw = self.recv_frame(1.0)
-        if not fc_raw or (fc_raw[0] >> 4) != 3:
+        if not fc_raw:
             logger.error("No Flow Control received (Timeout)")
             return False
 
         fc = bytes(fc_raw) if not isinstance(fc_raw, bytes) else fc_raw
         logger.debug(f"RX FC: {fc.hex()}")
 
-        if (fc[0] >> 4) != 3:
-            logger.error(f"Invalid Flow Control received: {fc.hex()}")
+        pci_type = (fc[0] >> 4) & 0x0F
+
+        # 🔥 NEW: Handle Single Frame Response (Negative Response)
+        if pci_type == 0:
+            length = fc[0] & 0x0F
+            response = bytes(fc[1:1+length])
+            logger.error(
+                f"ECU rejected request with immediate response: {response.hex()}")
+            # This is a negative response (7F XX XX) - let _receive_response handle it
             return False
 
-        stmin_raw = fc[2]
-        if stmin_raw <= 0x7F:
-            stmin = stmin_raw / 1000.0
-        elif 0xF1 <= stmin_raw <= 0xF9:
-            stmin = (stmin_raw - 0xF0) / 10000.0
+        # Handle Flow Control (Expected)
+        elif pci_type == 3:
+            stmin_raw = fc[2]
+            if stmin_raw <= 0x7F:
+                stmin = stmin_raw / 1000.0
+            elif 0xF1 <= stmin_raw <= 0xF9:
+                stmin = (stmin_raw - 0xF0) / 10000.0
+            else:
+                stmin = 0.01
+
+            logger.debug(f"Using STmin: {stmin}s")
+
+            # Send Consecutive Frames
+            seq = 1
+            idx = first_len
+
+            while idx < length:
+                chunk = payload[idx:idx+7]
+                cf = bytearray([0x20 | (seq & 0x0F)]) + chunk
+
+                while len(cf) < 8:
+                    cf.append(0x00)
+
+                self.send_frame(bytes(cf))
+                idx += 7
+                seq = (seq + 1) & 0x0F
+                time.sleep(stmin)
+
+            return True
+
         else:
-            stmin = 0.01
-
-        logger.debug(f"Using STmin: {stmin}s")
-
-        # Send Consecutive Frames
-        seq = 1
-        idx = first_len
-
-        while idx < length:
-            chunk = payload[idx:idx+7]
-            cf = bytearray([0x20 | (seq & 0x0F)]) + chunk
-
-            while len(cf) < 8:
-                cf.append(0x00)
-
-            self.send_frame(bytes(cf))
-            idx += 7
-            seq = (seq + 1) & 0x0F
-            time.sleep(stmin)
-
-        return True
+            logger.error(
+                f"Unexpected PCI type {pci_type} received: {fc.hex()}")
+            return False
 
     def _receive_response(self, timeout: float = 2.0) -> Optional[bytes]:
         """Receive and parse UDS response (Strict Match to check.py)"""
@@ -102,6 +116,7 @@ class ISOTPHandler:
                 continue
 
             raw = bytes(data) if not isinstance(data, bytes) else data
+            logger.debug(f"RX raw frame: {raw.hex()}")
             pci_type = (raw[0] >> 4) & 0x0F
 
             # Single Frame (SF)
