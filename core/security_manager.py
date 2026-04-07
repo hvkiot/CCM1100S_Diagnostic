@@ -49,7 +49,6 @@ class SecurityManager:
 
                 # Calculate key and send IMMEDIATELY (Maximum Speed!)
                 key = self.calculate_key(seed)
-                time.sleep(0.2)
                 verify_response = uds_client.raw_request(
                     bytes([0x27, level + 1]) + key)
 
