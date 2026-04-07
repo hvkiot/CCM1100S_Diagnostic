@@ -18,8 +18,8 @@ class ISOTPHandler:
         # 🛑 THE FIX: Non-Blocking Flush
         # Using 0.0 instantly clears ghost frames without adding an
         # artificial sleep delay that ruins the ECU's Security Timer!
-        while self.recv_frame(0.0) is not None:
-            pass
+        # while self.recv_frame(0.0) is not None:
+        #     pass
 
         # Send request
         if not self._send_request(payload):
@@ -51,10 +51,13 @@ class ISOTPHandler:
         logger.debug(f"TX FF: {ff.hex()}")
         self.send_frame(bytes(ff))
 
+        logger.info(f"Sent First Frame, waiting for Flow Control from ECU...")
+
         # Wait for Flow Control or Immediate Response
         fc_raw = self.recv_frame(1.0)
         if not fc_raw:
             logger.error("No Flow Control received (Timeout)")
+            logger.error("ECU did not respond within 1 second")
             return False
 
         fc = bytes(fc_raw) if not isinstance(fc_raw, bytes) else fc_raw
