@@ -57,17 +57,11 @@ class UDSClient:
         )
 
     def _receive_can_frame(self, timeout: float = 1.0):
+        """Receive CAN frame"""
         msg = self.can_manager.receive_message(timeout)
-        if msg:
-            logger.info(
-                f"🔍 CAN RX: ID={hex(msg.arbitration_id)} data={msg.data.hex()}")
-            if msg.arbitration_id == self.can_manager.config.rx_id:
-                return msg.data
-            else:
-                logger.warning(
-                    f"Discarding wrong ID: {hex(msg.arbitration_id)}")
-        else:
-            logger.debug("No CAN message received within timeout")
+
+        if msg and msg.arbitration_id == self.can_manager.config.rx_id:
+            return msg.data
         return None
 
     def diagnostic_session_control(self, session_type: UDSSessionType) -> bool:
