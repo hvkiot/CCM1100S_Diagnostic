@@ -208,26 +208,21 @@ class UDSClient:
             # We return a specific "magic" value to indicate a hardware failure
             return b"CAN_HARDWARE_ERROR"
 
-    def tester_present(self, suppress_response: bool = False) -> bool:
+    def tester_present(self) -> bool:
         """
-        Send Tester Present (0x3E) to keep session alive and check connectivity.
-        Returns True if ECU responds (even with negative response), False on timeout.
+        Send Tester Present (0x3E 0x00) to check if ECU is alive.
+        Returns True if ECU responds (positive or negative), False on timeout/error.
         """
         if not self.iso_tp:
             return False
 
-        # 0x3E 0x00 = Tester Present with zero subfunction (require response)
-        # 0x3E 0x80 = Tester Present with suppressPosRspMsgIndicationBit set (no response expected)
-        subfunc = 0x80 if suppress_response else 0x00
-        payload = bytes([0x3E, subfunc])
-
+        payload = bytes([0x3E, 0x00])  # Require response
         try:
             response = self.iso_tp.send(payload, timeout=0.5)
-            if suppress_response:
-                # If we suppressed response, just the act of sending without ISO-TP error is good
-                return True
-            else:
-                # Positive response is 0x7E, but any response indicates ECU is alive
-                return response is not None
+            if response and len(response) > 0:
+                # Positive response = 0x7E, Negative = 0x7F
+                if response[0] in (0x7E, 0x7F):
+                    return True
+            return False
         except Exception:
             return False

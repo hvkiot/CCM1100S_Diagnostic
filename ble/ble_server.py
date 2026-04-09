@@ -202,25 +202,23 @@ class BLEServer:
     async def _monitor_ecu_connection(self):
         """Background task that monitors ECU connectivity and pushes status to app."""
         logger.info("ECU connection monitor started")
-        was_connected = False
-        check_interval = 2.0  # seconds
+        was_connected = None  # Force first status send
+        check_interval = 3.0  # seconds (adjust as needed)
 
-        # Give initial connection time to settle
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(1.0)  # Let everything settle
 
         while True:
             try:
-                # Check current connection state
-                is_connected = self.command_handler.uds_client.can_manager._is_connected
-
-                if is_connected:
-                    # Verify ECU actually responds
+                # Check if CAN interface is up first
+                if not self.command_handler.uds_client.can_manager._is_connected:
+                    is_connected = False
+                else:
+                    # Perform a real ECU check
                     is_connected = await asyncio.get_event_loop().run_in_executor(
-                        # suppress response for speed
-                        None, self.command_handler.uds_client.tester_present, True
+                        None, self.command_handler.uds_client.tester_present
                     )
 
-                # State change detection
+                # Send status only on change or first run
                 if is_connected != was_connected:
                     if is_connected:
                         logger.info("🟢 ECU connected")
@@ -237,7 +235,6 @@ class BLEServer:
                             "message": "ECU is offline or not responding"
                         }
 
-                    # Push notification via the characteristic
                     if hasattr(self, '_characteristic') and self._characteristic:
                         self._characteristic.push_status_update(status_msg)
 

@@ -149,5 +149,5 @@ class ISOTPHandler:
             else:
                 continue
 
-        logger.error("Timeout waiting for response")
+        logger.debug("Timeout waiting for response")
         return None
