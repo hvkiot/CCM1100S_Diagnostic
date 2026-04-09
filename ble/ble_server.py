@@ -110,6 +110,18 @@ class Characteristic(ServiceInterface):
             'Value': Variant('ay', data)
         })
 
+    def push_system_error(self, error_type, message):
+        if self.notifying:
+            err_packet = {
+                "status": "SYSTEM_ERROR",
+                "type": error_type,
+                "message": message,
+                "success": False
+            }
+            payload = json.dumps(err_packet).encode('utf-8')
+            self.send_notification(payload)
+            logger.error(f"🚨 Pushed System Error to App: {error_type}")
+
 
 class Service(ServiceInterface):
     def __init__(self, uuid, primary):

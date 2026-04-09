@@ -16,7 +16,7 @@ class CommandHandler:
         self._pending_operations = {}
 
     async def handle_command(self, command: Dict[str, Any]) -> Dict[str, Any]:
-        """Route command to appropriate handler"""
+        """Route command to appropriate handler with Hardware Error detection"""
         cmd_type = command.get('command')
         cmd_id = command.get('id', 0)
 
@@ -32,6 +32,14 @@ class CommandHandler:
         handler = handlers.get(cmd_type)
         if handler:
             result = await handler(command)
+            if result.get('raw') == "43414e5f48415244574152455f4552524f52":
+                return {
+                    'status': 'CAN_ERROR',
+                    'success': False,
+                    'message': 'Physical ECU connection lost',
+                    'id': cmd_id
+                }
+
             result['id'] = cmd_id
             return result
         else:

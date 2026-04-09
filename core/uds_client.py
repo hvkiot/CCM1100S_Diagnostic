@@ -191,3 +191,19 @@ class UDSClient:
         payload = bytes([0x31, subfunction, (routine_id >> 8)
                         & 0xFF, routine_id & 0xFF]) + data
         return self.iso_tp.send(payload)
+
+    def raw_request(self, payload: bytes, timeout: float = 1.0) -> Optional[bytes]:
+        """Send raw UDS request with error detection"""
+        if not self.iso_tp:
+            return None
+
+        try:
+            response = self.iso_tp.send(payload, timeout)
+            if response:
+                logger.info(f"Raw response: {response.hex()}")
+            return response
+        except Exception as e:
+            # 🛑 This is where we catch the CAN disconnect or ISO-TP timeout
+            logger.error(f"ISO-TP Communication Error: {e}")
+            # We return a specific "magic" value to indicate a hardware failure
+            return b"CAN_HARDWARE_ERROR"
