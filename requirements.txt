@@ -6,6 +6,7 @@ pycryptodome
 
 # Data validation (optional)
 pydantic
+dbus-next
 
 # DBus for Bluetooth (system package, not pip)
 # dbus-python is installed via apt, not pip

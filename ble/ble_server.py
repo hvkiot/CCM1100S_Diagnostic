@@ -110,17 +110,14 @@ class Characteristic(ServiceInterface):
             'Value': Variant('ay', data)
         })
 
-    def push_system_error(self, error_type, message):
+    def push_status_update(self, status_dict: dict):
+        """Push a status update to the connected Flutter app."""
         if self.notifying:
-            err_packet = {
-                "status": "SYSTEM_ERROR",
-                "type": error_type,
-                "message": message,
-                "success": False
-            }
-            payload = json.dumps(err_packet).encode('utf-8')
-            self.send_notification(payload)
-            logger.error(f"🚨 Pushed System Error to App: {error_type}")
+            status_json = json.dumps(status_dict)
+            self.send_notification(status_json.encode('utf-8'))
+            logger.info(f"📤 Pushed status: {status_dict['status']}")
+        else:
+            logger.debug("Notifications not enabled; status not sent")
 
 
 class Service(ServiceInterface):
@@ -198,7 +195,61 @@ class Advertisement(ServiceInterface):
 class BLEServer:
     def __init__(self, command_handler):
         self.command_handler = command_handler
+        self.characteristic = None
+        self._monitor_task = None
         self.bus = None
+
+    async def _monitor_ecu_connection(self):
+        """Background task that monitors ECU connectivity and pushes status to app."""
+        logger.info("ECU connection monitor started")
+        was_connected = False
+        check_interval = 2.0  # seconds
+
+        # Give initial connection time to settle
+        await asyncio.sleep(1.0)
+
+        while True:
+            try:
+                # Check current connection state
+                is_connected = self.command_handler.uds_client.can_manager._is_connected
+
+                if is_connected:
+                    # Verify ECU actually responds
+                    is_connected = await asyncio.get_event_loop().run_in_executor(
+                        # suppress response for speed
+                        None, self.command_handler.uds_client.tester_present, True
+                    )
+
+                # State change detection
+                if is_connected != was_connected:
+                    if is_connected:
+                        logger.info("🟢 ECU connected")
+                        status_msg = {
+                            "status": "ECU_CONNECTED",
+                            "success": True,
+                            "message": "ECU is online and responding"
+                        }
+                    else:
+                        logger.warning("🔴 ECU disconnected")
+                        status_msg = {
+                            "status": "ECU_DISCONNECTED",
+                            "success": False,
+                            "message": "ECU is offline or not responding"
+                        }
+
+                    # Push notification via the characteristic
+                    if hasattr(self, '_characteristic') and self._characteristic:
+                        self._characteristic.push_status_update(status_msg)
+
+                    was_connected = is_connected
+
+                await asyncio.sleep(check_interval)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Monitor error: {e}")
+                await asyncio.sleep(5.0)
 
     async def _force_disconnect_all(self):
         """Force disconnect any connected BLE devices"""
@@ -247,7 +298,7 @@ class BLEServer:
             # Create application
             app = Application()
             service = Service(SERVICE_UUID, True)
-            characteristic = Characteristic(
+            self.characteristic = Characteristic(
                 CHARACTERISTIC_UUID,
                 ['read', 'write', 'indicate'],
                 service.path,
@@ -255,13 +306,13 @@ class BLEServer:
             )
             advertisement = Advertisement()
 
-            service.add_characteristic(characteristic)
+            service.add_characteristic(self.characteristic)
             app.add_service(service)
 
             # Export objects
             self.bus.export(app.path, app)
             self.bus.export(service.path, service)
-            self.bus.export(characteristic.path, characteristic)
+            self.bus.export(self.characteristic.path, self.characteristic)
             self.bus.export(advertisement.path, advertisement)
 
             # Get BlueZ interfaces
@@ -281,6 +332,9 @@ class BLEServer:
             logger.info(
                 "✅ Advertisement registered - Device is now discoverable")
 
+            self._monitor_task = asyncio.create_task(
+                self._monitor_ecu_connection())
+
             logger.info("BLE server running. Ready for connections.")
 
             # Keep running
@@ -291,6 +345,12 @@ class BLEServer:
             raise
 
     async def stop(self):
+        if hasattr(self, '_monitor_task'):
+            self._monitor_task.cancel()
+            try:
+                await self._monitor_task
+            except:
+                pass
         if self.bus:
             self.bus.disconnect()
             logger.info("BLE server stopped")
