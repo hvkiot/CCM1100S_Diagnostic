@@ -31,16 +31,13 @@ class UDSBLEBridge:
         self.command_handler = CommandHandler(self.uds_client)
         self.ble_server = BLEServer(self.command_handler)
 
-        # Try to connect to ECU
-        for retry in range(3):
-            if self.uds_client.connect():
-                logger.info("ECU connected successfully")
-                return True
-            logger.warning(f"ECU connection failed, retry {retry + 1}/3")
-            await asyncio.sleep(2)
+        # Try initial ECU connection without blocking BLE server
+        if self.uds_client.connect():
+            logger.info("Initial ECU connection successful")
+        else:
+            logger.warning("Initial ECU connection failed. BLE server will monitor in background.")
 
-        logger.error("Failed to connect to ECU after retries")
-        return False
+        return True  # Always return True to start BLE
 
     async def shutdown(self):
         logger.info("Shutting down...")

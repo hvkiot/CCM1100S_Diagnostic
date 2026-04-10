@@ -220,7 +220,18 @@ class BLEServer:
             try:
                 # Check ECU connection status
                 is_connected = False
-                if self.command_handler.uds_client.can_manager._is_connected:
+
+                # Try to reconnect if not connected
+                if not self.command_handler.uds_client.can_manager.is_connected:
+                    try:
+                        # Reconnect is synchronous, run in executor to avoid blocking BLE
+                        await asyncio.get_event_loop().run_in_executor(
+                            None, self.command_handler.uds_client.connect
+                        )
+                    except Exception as e:
+                        logger.debug(f"Monitor reconnect attempt failed: {e}")
+
+                if self.command_handler.uds_client.can_manager.is_connected:
                     try:
                         is_connected = await asyncio.get_event_loop().run_in_executor(
                             None, self.command_handler.uds_client.tester_present
