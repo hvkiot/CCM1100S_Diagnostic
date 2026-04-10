@@ -119,6 +119,12 @@ class Characteristic(ServiceInterface):
         else:
             logger.debug("Notifications not enabled; status not sent")
 
+    def push_status_update(self, status_dict: dict):
+        if self.notifying:
+            status_json = json.dumps(status_dict)
+            self.send_notification(status_json.encode('utf-8'))
+            logger.info(f"📤 Pushed status: {status_dict['status']}")
+
 
 class Service(ServiceInterface):
     def __init__(self, uuid, primary):
