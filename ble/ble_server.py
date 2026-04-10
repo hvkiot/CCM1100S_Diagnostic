@@ -120,10 +120,13 @@ class Characteristic(ServiceInterface):
             logger.debug("Notifications not enabled; status not sent")
 
     def push_status_update(self, status_dict: dict):
+        """Push a status update to the connected Flutter app."""
         if self.notifying:
             status_json = json.dumps(status_dict)
             self.send_notification(status_json.encode('utf-8'))
             logger.info(f"📤 Pushed status: {status_dict['status']}")
+        else:
+            logger.debug("Notifications not enabled; status not sent")
 
 
 class Service(ServiceInterface):
@@ -208,10 +211,10 @@ class BLEServer:
     async def _monitor_ecu_connection(self):
         """Background task that monitors ECU connectivity and pushes status to app."""
         logger.info("ECU connection monitor started")
-        was_connected = None  # Force first status send
-        check_interval = 3.0  # seconds (adjust as needed)
+        was_connected = None
+        check_interval = 3.0
 
-        await asyncio.sleep(1.0)  # Let everything settle
+        await asyncio.sleep(1.0)
 
         while True:
             try:
@@ -219,7 +222,7 @@ class BLEServer:
                 if not self.command_handler.uds_client.can_manager._is_connected:
                     is_connected = False
                 else:
-                    # Perform a real ECU check
+                    # Perform a real ECU check using Tester Present
                     is_connected = await asyncio.get_event_loop().run_in_executor(
                         None, self.command_handler.uds_client.tester_present
                     )
@@ -231,18 +234,21 @@ class BLEServer:
                         status_msg = {
                             "status": "ECU_CONNECTED",
                             "success": True,
-                            "message": "ECU is online and responding"
+                            "message": "ECU is online and responding",
+                            "type": "connection_status"
                         }
                     else:
                         logger.warning("🔴 ECU disconnected")
                         status_msg = {
                             "status": "ECU_DISCONNECTED",
                             "success": False,
-                            "message": "ECU is offline or not responding"
+                            "message": "ECU is offline or not responding",
+                            "type": "connection_status"
                         }
 
-                    if hasattr(self, '_characteristic') and self._characteristic:
-                        self._characteristic.push_status_update(status_msg)
+                    # Send to Flutter via characteristic
+                    if self.characteristic and self.characteristic.notifying:
+                        self.characteristic.push_status_update(status_msg)
 
                     was_connected = is_connected
 
