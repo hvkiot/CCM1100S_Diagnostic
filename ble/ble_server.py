@@ -218,32 +218,33 @@ class BLEServer:
 
         while True:
             try:
-                # Check if CAN interface is up first
-                if not self.command_handler.uds_client.can_manager._is_connected:
-                    is_connected = False
-                else:
-                    # Perform a real ECU check using Tester Present
-                    is_connected = await asyncio.get_event_loop().run_in_executor(
-                        None, self.command_handler.uds_client.tester_present
-                    )
+                # Check ECU connection status
+                is_connected = False
+                if self.command_handler.uds_client.can_manager._is_connected:
+                    try:
+                        is_connected = await asyncio.get_event_loop().run_in_executor(
+                            None, self.command_handler.uds_client.tester_present
+                        )
+                    except Exception:
+                        is_connected = False
 
-                # Send status only on change or first run
+                # Send status only on change
                 if is_connected != was_connected:
                     if is_connected:
                         logger.info("🟢 ECU connected")
                         status_msg = {
+                            "type": "connection_status",
                             "status": "ECU_CONNECTED",
                             "success": True,
-                            "message": "ECU is online and responding",
-                            "type": "connection_status"
+                            "message": "ECU is online and responding"
                         }
                     else:
                         logger.warning("🔴 ECU disconnected")
                         status_msg = {
+                            "type": "connection_status",
                             "status": "ECU_DISCONNECTED",
                             "success": False,
-                            "message": "ECU is offline or not responding",
-                            "type": "connection_status"
+                            "message": "ECU is offline or not responding"
                         }
 
                     # Send to Flutter via characteristic
@@ -354,7 +355,7 @@ class BLEServer:
             raise
 
     async def stop(self):
-        if hasattr(self, '_monitor_task'):
+        if hasattr(self, '_monitor_task') and self._monitor_task is not None:
             self._monitor_task.cancel()
             try:
                 await self._monitor_task

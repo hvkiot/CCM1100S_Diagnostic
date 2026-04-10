@@ -49,7 +49,7 @@ class CANBusManager:
             logger.info("CAN bus disconnected")
 
     def send_message(self, arbitration_id: int, data: bytes, is_extended: bool = True) -> bool:
-        """Send CAN message"""
+        """Send CAN message with error handling"""
         if not self._is_connected or not self.bus:
             return False
 
@@ -63,11 +63,17 @@ class CANBusManager:
             logger.debug(f"TX: {hex(arbitration_id)} {data.hex()}")
             return True
         except Exception as e:
-            logger.error(f"Failed to send message: {e}")
+            error_msg = str(e)
+            if "No buffer space available" in error_msg:
+                # ECU is likely OFF or not responding
+                logger.debug(f"CAN buffer full - ECU may be offline")
+                self._is_connected = False
+            else:
+                logger.error(f"Failed to send message: {e}")
             return False
 
     def receive_message(self, timeout: float = 1.0) -> Optional[can.Message]:
-        """Receive CAN message - accept any ID for debugging"""
+        """Receive CAN message"""
         if not self._is_connected or not self.bus:
             return None
 
@@ -75,7 +81,11 @@ class CANBusManager:
             msg = self.bus.recv(timeout)
             if msg:
                 logger.debug(f"RX: {hex(msg.arbitration_id)} {msg.data.hex()}")
-                return msg  # Don't filter by ID
+                return msg
         except Exception as e:
             pass
         return None
+
+    @property
+    def is_connected(self) -> bool:
+        return self._is_connected

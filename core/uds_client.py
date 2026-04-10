@@ -211,12 +211,15 @@ class UDSClient:
     def tester_present(self) -> bool:
         """
         Send Tester Present (0x3E 0x00) to check if ECU is alive.
-        Returns True if ECU responds (positive or negative), False on timeout/error.
+        Returns True if ECU responds, False on timeout/error.
         """
         if not self.iso_tp:
             return False
 
-        payload = bytes([0x3E, 0x00])  # Require response
+        if not self.can_manager.is_connected:
+            return False
+
+        payload = bytes([0x3E, 0x00])
         try:
             response = self.iso_tp.send(payload, timeout=0.5)
             if response and len(response) > 0:
