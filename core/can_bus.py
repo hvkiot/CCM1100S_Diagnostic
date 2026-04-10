@@ -1,6 +1,5 @@
 # core/can_bus.py
 import can
-import time
 from typing import Optional
 from config.settings import CANConfig
 from utils.logger import get_logger
