@@ -64,8 +64,11 @@ class CANBusManager:
         except Exception as e:
             error_msg = str(e)
             if "No buffer space available" in error_msg:
-                # ECU is likely OFF or not responding
-                logger.debug(f"CAN buffer full - ECU may be offline")
+                # 🛑 KEEP THE SOCKET OPEN! 
+                # ECU is likely OFF. We drop the packet and wait for ECU to come online.
+                # The CAN controller will empty the queue when the ECU responds.
+                pass
+            elif "Network is down" in error_msg:
                 self._is_connected = False
             else:
                 logger.error(f"Failed to send message: {e}")

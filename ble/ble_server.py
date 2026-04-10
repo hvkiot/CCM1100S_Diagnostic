@@ -224,16 +224,7 @@ class BLEServer:
                 # Check ECU connection status
                 is_connected = False
 
-                # Try to reconnect if not connected
-                if not self.command_handler.uds_client.can_manager.is_connected:
-                    try:
-                        # Reconnect is synchronous, run in executor to avoid blocking BLE
-                        await asyncio.get_event_loop().run_in_executor(
-                            None, self.command_handler.uds_client.connect
-                        )
-                    except Exception as e:
-                        logger.debug(f"Monitor reconnect attempt failed: {e}")
-
+                # Only test the logic layer if the physical SocketCAN bus is open
                 if self.command_handler.uds_client.can_manager.is_connected:
                     try:
                         is_connected = await asyncio.get_event_loop().run_in_executor(
@@ -241,6 +232,17 @@ class BLEServer:
                         )
                     except Exception:
                         is_connected = False
+                        
+                # 🚀 Re-establish Extended Session immediately when ECU powers back on
+                if is_connected and not was_connected and was_connected is not None:
+                    try:
+                        logger.info("ECU returned online. Re-establishing Extended Session...")
+                        from core.uds_client import UDSSessionType
+                        await asyncio.get_event_loop().run_in_executor(
+                            None, self.command_handler.uds_client.diagnostic_session_control, UDSSessionType.EXTENDED
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to auto-enter Extended Session: {e}")
 
                 # Send status only on change
                 if is_connected != was_connected:
