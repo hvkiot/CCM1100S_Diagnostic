@@ -94,6 +94,17 @@ class Characteristic(ServiceInterface):
     async def StartNotify(self):
         self.notifying = True
         logger.info("Notifications enabled")
+        # Send the last known ECU status immediately upon connection if it exists
+        if hasattr(self, 'last_status_msg') and self.last_status_msg:
+            # Fire in background with a small delay so the app is ready to receive it
+            asyncio.create_task(self._push_cached_status())
+
+    async def _push_cached_status(self):
+        await asyncio.sleep(0.5)
+        if self.notifying and getattr(self, 'last_status_msg', None):
+            logger.info("Pushing cached ECU status to newly connected app...")
+            status_json = json.dumps(self.last_status_msg)
+            self.send_notification(status_json.encode('utf-8'))
 
     @method()
     async def StopNotify(self):
@@ -112,21 +123,13 @@ class Characteristic(ServiceInterface):
 
     def push_status_update(self, status_dict: dict):
         """Push a status update to the connected Flutter app."""
+        self.last_status_msg = status_dict
         if self.notifying:
             status_json = json.dumps(status_dict)
             self.send_notification(status_json.encode('utf-8'))
             logger.info(f"📤 Pushed status: {status_dict['status']}")
         else:
-            logger.debug("Notifications not enabled; status not sent")
-
-    def push_status_update(self, status_dict: dict):
-        """Push a status update to the connected Flutter app."""
-        if self.notifying:
-            status_json = json.dumps(status_dict)
-            self.send_notification(status_json.encode('utf-8'))
-            logger.info(f"📤 Pushed status: {status_dict['status']}")
-        else:
-            logger.debug("Notifications not enabled; status not sent")
+            logger.debug("Notifications not enabled; status not sent but cached")
 
 
 class Service(ServiceInterface):
