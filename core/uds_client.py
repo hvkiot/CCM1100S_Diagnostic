@@ -124,8 +124,13 @@ class UDSClient:
             return "Not Programmed".encode('utf-8')
 
         # ASCII Strings (return as-is)
-        if did in [0xF190, 0xF191, 0xF187, 0xF188, 0xF1A0, 0xF1A1, 0xF1A6, 0x220D, 0x220E]:
-            return data  # Already ASCII
+        if did in [0xF190, 0xF191, 0xF187, 0xF188, 0xF1A0, 0xF1A1, 0xF1A6, 0x220E]:
+            return data.replace(b'\x00', b'')  # Already ASCII
+
+        # Firmware (Extract first 4 bytes as Hex)
+        elif did in [0x220D]:
+            if len(data) >= 4:
+                return data[:4].hex().upper().encode('utf-8')
 
         # 32-bit Unsigned Integer (Serial Number, Product Code)
         elif did in [0xF18C, 0xF192]:
