@@ -18,8 +18,8 @@ class ISOTPHandler:
         # 🛑 THE FIX: Non-Blocking Flush
         # Using 0.0 instantly clears ghost frames without adding an
         # artificial sleep delay that ruins the ECU's Security Timer!
-        # while self.recv_frame(0.0) is not None:
-        #     pass
+        while self.recv_frame(0.0) is not None:
+            pass
 
         # Send request
         if not self._send_request(payload):

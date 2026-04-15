@@ -14,36 +14,38 @@ class CommandHandler:
     def __init__(self, uds_client: UDSClient):
         self.uds_client = uds_client
         self._pending_operations = {}
+        self._bus_lock = asyncio.Lock()  # 🛡️ Mutex for UDS Bus
 
     async def handle_command(self, command: Dict[str, Any]) -> Dict[str, Any]:
-        """Route command to appropriate handler with Hardware Error detection"""
-        cmd_type = command.get('command')
-        cmd_id = command.get('id', 0)
+        """Route command with bus locking to prevent cross-talk"""
+        async with self._bus_lock:
+            cmd_type = command.get('command')
+            cmd_id = command.get('id', 0)
 
-        handlers = {
-            'read_did': self._handle_read_did,
-            'write_did': self._handle_write_did,
-            'security_access': self._handle_security_access,
-            'diagnostic_session': self._handle_diagnostic_session,
-            'routine_control': self._handle_routine_control,
-            'get_status': self._handle_get_status,
-        }
+            handlers = {
+                'read_did': self._handle_read_did,
+                'write_did': self._handle_write_did,
+                'security_access': self._handle_security_access,
+                'diagnostic_session': self._handle_diagnostic_session,
+                'routine_control': self._handle_routine_control,
+                'get_status': self._handle_get_status,
+            }
 
-        handler = handlers.get(cmd_type)
-        if handler:
-            result = await handler(command)
-            if result.get('raw') == "43414e5f48415244574152455f4552524f52":
-                return {
-                    'status': 'CAN_ERROR',
-                    'success': False,
-                    'message': 'Physical ECU connection lost',
-                    'id': cmd_id
-                }
+            handler = handlers.get(cmd_type)
+            if handler:
+                result = await handler(command)
+                if result.get('raw') == "43414e5f48415244574152455f4552524f52":
+                    return {
+                        'status': 'CAN_ERROR',
+                        'success': False,
+                        'message': 'Physical ECU connection lost',
+                        'id': cmd_id
+                    }
 
-            result['id'] = cmd_id
-            return result
-        else:
-            return {'error': f'Unknown command: {cmd_type}', 'id': cmd_id}
+                result['id'] = cmd_id
+                return result
+            else:
+                return {'error': f'Unknown command: {cmd_type}', 'id': cmd_id}
 
     async def _handle_read_did(self, command: Dict) -> Dict:
         did_str = command.get('did', '')
@@ -169,10 +171,22 @@ class CommandHandler:
             "id": command.get('id', 0)
         }
 
+    async def get_ecu_connection_status(self) -> bool:
+        """Lock-protected check for background monitor use"""
+        async with self._bus_lock:
+            return await asyncio.get_event_loop().run_in_executor(
+                None, self.uds_client.tester_present
+            )
+
     async def get_status(self) -> Dict[str, Any]:
-        """Get current status of UDS client"""
+        """Get current status of UDS client including real ECU check"""
+        # This is called via handle_command, so it is already locked
+        is_ecu_alive = await asyncio.get_event_loop().run_in_executor(
+            None, self.uds_client.tester_present
+        )
+        
         return {
-            'connected': self.uds_client.can_manager._is_connected,
+            'connected': is_ecu_alive,
             'authenticated': self.uds_client._is_authenticated,
             'session': self.uds_client._current_session.name if self.uds_client._current_session else 'None',
             'security_unlocked': self.uds_client.security_manager.is_unlocked

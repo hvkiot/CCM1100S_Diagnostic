@@ -227,9 +227,7 @@ class BLEServer:
                 # Only test the logic layer if the physical SocketCAN bus is open
                 if self.command_handler.uds_client.can_manager.is_connected:
                     try:
-                        is_connected = await asyncio.get_event_loop().run_in_executor(
-                            None, self.command_handler.uds_client.tester_present
-                        )
+                        is_connected = await self.command_handler.get_ecu_connection_status()
                     except Exception:
                         is_connected = False
                         
