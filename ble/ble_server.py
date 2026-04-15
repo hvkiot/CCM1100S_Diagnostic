@@ -122,7 +122,7 @@ class Characteristic(ServiceInterface):
         self.value = data
 
         self.emit_properties_changed({
-            'Value': Variant('ay', data)
+            'Value': data
         })
 
     def push_status_update(self, status_dict: dict):
