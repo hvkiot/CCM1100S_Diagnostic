@@ -157,8 +157,17 @@ class CommandHandler:
             return {'success': False, 'error': 'No response from ECU'}
 
     async def _handle_get_status(self, command: Dict) -> Dict:
-        """Get current system status"""
-        return await self.get_status()
+        """Get current system status via standardized response"""
+        status = await self.get_status()
+        is_connected = status.get('connected', False)
+        
+        return {
+            "type": "connection_status",
+            "status": "ECU_CONNECTED" if is_connected else "ECU_DISCONNECTED",
+            "success": is_connected,
+            "message": "ECU is online and responding" if is_connected else "ECU is offline or not responding",
+            "id": command.get('id', 0)
+        }
 
     async def get_status(self) -> Dict[str, Any]:
         """Get current status of UDS client"""
