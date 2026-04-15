@@ -110,7 +110,17 @@ class UDSClient:
     def _scale_did_data(self, did: int, data: bytes) -> bytes:
         """Scale raw hex data to human-readable format"""
 
-        if all(b == 0 for b in data):
+        # Define numeric DIDs that should allow 0x00 values (e.g. 0.0V, 0.0°)
+        # We only show "Not Programmed" for text/ID strings, not for sensor math.
+        numeric_dids = [
+            0x220F,  # Voltage
+            0x2210, 0x2211, 0x2212,  # Angles
+            0x2213, 0x2214,  # Percentages
+            0x2215, 0x2216, 0x2217, 0x2218, 0x2219, 0x221A, 0x221B, 0x221C,  # Currents
+            0xF18C, 0xF192  # Serial Number, Product Code
+        ]
+
+        if all(b == 0 for b in data) and did not in numeric_dids:
             return "Not Programmed".encode('utf-8')
 
         # ASCII Strings (return as-is)
@@ -123,7 +133,7 @@ class UDSClient:
                 value = int.from_bytes(data[:4], byteorder='big')
                 return str(value).encode('utf-8')
 
-        # System Voltage (0.1V resolution)
+        # System Voltage (0.01V resolution)
         elif did == 0x220F:
             if len(data) >= 2:
                 raw = int.from_bytes(data[:2], byteorder='big')

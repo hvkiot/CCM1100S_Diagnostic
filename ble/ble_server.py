@@ -133,7 +133,8 @@ class Characteristic(ServiceInterface):
             self.send_notification(status_json.encode('utf-8'))
             logger.info(f"📤 Pushed status: {status_dict['status']}")
         else:
-            logger.debug("Notifications not enabled; status not sent but cached")
+            logger.debug(
+                "Notifications not enabled; status not sent but cached")
 
 
 class Service(ServiceInterface):
@@ -234,17 +235,19 @@ class BLEServer:
                         is_connected = await self.command_handler.get_ecu_connection_status()
                     except Exception:
                         is_connected = False
-                        
+
                 # 🚀 Re-establish Extended Session immediately when ECU powers back on
                 if is_connected and not was_connected and was_connected is not None:
                     try:
-                        logger.info("ECU returned online. Re-establishing Extended Session...")
+                        logger.info(
+                            "ECU returned online. Re-establishing Extended Session...")
                         from core.uds_client import UDSSessionType
                         await asyncio.get_event_loop().run_in_executor(
                             None, self.command_handler.uds_client.diagnostic_session_control, UDSSessionType.EXTENDED
                         )
                     except Exception as e:
-                        logger.warning(f"Failed to auto-enter Extended Session: {e}")
+                        logger.warning(
+                            f"Failed to auto-enter Extended Session: {e}")
 
                 # Send status only on change
                 if is_connected != was_connected:
