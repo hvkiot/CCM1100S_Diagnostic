@@ -38,6 +38,10 @@ class Characteristic(ServiceInterface):
     def Flags(self) -> 'as':
         return self.flags
 
+    @dbus_property(access=PropertyAccess.READ)
+    def Value(self) -> 'ay':
+        return self.value
+
     @method()
     def ReadValue(self, options: 'a{sv}') -> 'ay':
         return self.value
