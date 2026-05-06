@@ -4,7 +4,7 @@ import re
 
 bus = can.interface.Bus(
     interface='socketcan',
-    channel='can1',
+    channel='can0',
     bitrate=250000
 )
 

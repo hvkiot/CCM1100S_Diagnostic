@@ -6,7 +6,7 @@ from typing import Optional
 @dataclass
 class CANConfig:
     interface: str = 'socketcan'
-    channel: str = 'can1'
+    channel: str = 'can0'
     bitrate: int = 250000
     tx_id: int = 0x1BDA08F1
     rx_id: int = 0x1BDAF108
@@ -24,4 +24,3 @@ class BLEConfig:
 class SecurityConfig:
     secret_key: bytes = b"TCHRMVHA2BPX3ULC"
     security_access_level: int = 0x01
-    
